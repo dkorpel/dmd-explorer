@@ -1,0 +1,49 @@
+name: Deploy to GitHub Pages
+
+# Manual deploy: publishes compiler/wasm/web from the dkorpel/dmd
+# wasm-web-app branch as a static GitHub Pages site.
+on:
+  workflow_dispatch:
+
+# Allow the workflow to deploy to Pages via OIDC.
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Only one concurrent deploy; don't cancel an in-progress one.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+env:
+  SOURCE_REPO: dkorpel/dmd
+  SOURCE_REF: wasm-web-app
+  SOURCE_PATH: compiler/wasm/web
+
+jobs:
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out web folder from dmd
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.SOURCE_REPO }}
+          ref: ${{ env.SOURCE_REF }}
+          sparse-checkout: ${{ env.SOURCE_PATH }}
+          sparse-checkout-cone-mode: false
+
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: ${{ env.SOURCE_PATH }}
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
