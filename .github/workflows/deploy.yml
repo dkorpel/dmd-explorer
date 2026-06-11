@@ -1,7 +1,7 @@
 name: Deploy to GitHub Pages
 
-# Manual deploy: publishes compiler/wasm/web from the dkorpel/dmd
-# wasm-web-app branch as a static GitHub Pages site.
+# Manual deploy: builds dmd.wasm from the dkorpel/dmd wasm-web-app branch and
+# publishes compiler/wasm/web as a static GitHub Pages site.
 on:
   workflow_dispatch:
 
@@ -20,6 +20,10 @@ env:
   SOURCE_REPO: dkorpel/dmd
   SOURCE_REF: wasm-web-app
   SOURCE_PATH: compiler/wasm/web
+  # LDC version used to build the wasm module (matches local dev: LLVM 21).
+  LDC_VERSION: ldc-1.42.0
+  # wasi-sdk release whose sysroot provides wasm32-wasi/libc.a.
+  WASI_SDK_VERSION: "24"
 
 jobs:
   deploy:
@@ -28,13 +32,30 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     runs-on: ubuntu-latest
     steps:
-      - name: Check out web folder from dmd
+      - name: Check out dmd
         uses: actions/checkout@v4
         with:
           repository: ${{ env.SOURCE_REPO }}
           ref: ${{ env.SOURCE_REF }}
-          sparse-checkout: ${{ env.SOURCE_PATH }}
-          sparse-checkout-cone-mode: false
+
+      - name: Install LDC
+        uses: dlang-community/setup-dlang@v2
+        with:
+          compiler: ${{ env.LDC_VERSION }}
+
+      - name: Install wasi sysroot
+        run: |
+          set -eux
+          url="https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-${WASI_SDK_VERSION}/wasi-sysroot-${WASI_SDK_VERSION}.0.tar.gz"
+          curl -fL -o wasi-sysroot.tar.gz "$url"
+          mkdir -p "$RUNNER_TEMP/wasi-sysroot"
+          tar -xzf wasi-sysroot.tar.gz -C "$RUNNER_TEMP/wasi-sysroot" --strip-components=1
+          libc="$(find "$RUNNER_TEMP/wasi-sysroot" -path '*wasm32-wasi/libc.a' | head -1)"
+          test -n "$libc"
+          echo "WASI_LIBC=$libc" >> "$GITHUB_ENV"
+
+      - name: Build dmd.wasm
+        run: ./compiler/wasm/build.sh
 
       - name: Configure Pages
         uses: actions/configure-pages@v5
@@ -47,5 +68,3 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
-
-# trigger workflow registration
