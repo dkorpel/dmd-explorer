@@ -17,6 +17,8 @@ concurrency:
   cancel-in-progress: false
 
 env:
+  # Run the JS actions below on Node 24 (Node 20 is deprecated on the runners).
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
   SOURCE_REPO: dkorpel/dmd
   SOURCE_REF: wasm-web-app
   SOURCE_PATH: compiler/wasm/web
