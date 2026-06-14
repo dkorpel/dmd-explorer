@@ -20,6 +20,8 @@ env:
   SOURCE_REPO: dkorpel/dmd
   SOURCE_REF: wasm-web-app
   SOURCE_PATH: compiler/wasm/web
+  PHOBOS_REPO: dlang/phobos
+  PHOBOS_REF: master
   # LDC version used to build the wasm module (matches local dev: LLVM 21).
   LDC_VERSION: ldc-1.42.0
   # wasi-sdk release whose sysroot provides wasm32-wasi/libc.a.
@@ -37,6 +39,15 @@ jobs:
         with:
           repository: ${{ env.SOURCE_REPO }}
           ref: ${{ env.SOURCE_REF }}
+
+      # Phobos lives in a separate repo (druntime ships inside dmd). build.sh
+      # bakes std/ + etc/ into druntime_embed.d, so it needs PHOBOS_ROOT.
+      - name: Check out Phobos
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.PHOBOS_REPO }}
+          ref: ${{ env.PHOBOS_REF }}
+          path: phobos
 
       - name: Install LDC
         uses: dlang-community/setup-dlang@v2
@@ -56,6 +67,8 @@ jobs:
 
       - name: Build dmd.wasm
         run: ./compiler/wasm/build.sh
+        env:
+          PHOBOS_ROOT: ${{ github.workspace }}/phobos
 
       - name: Configure Pages
         uses: actions/configure-pages@v5
