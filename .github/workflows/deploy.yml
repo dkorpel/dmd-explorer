@@ -78,9 +78,10 @@ jobs:
           test -x /usr/bin/wasm-ld || sudo ln -s "$(ls /usr/bin/wasm-ld-* | tail -1)" /usr/bin/wasm-ld
           wasm-ld --version
 
+      # setup-dlang exports $DMD (ldmd2); build.d looks for HOST_DMD.
       - name: Build dmd
         working-directory: dmd
-        run: ./compiler/src/build.d
+        run: HOST_DMD="$DMD" ./compiler/src/build.d
 
       # Fetches the pinned wasi-sdk sysroot (libc.a + the mmap emulation) and
       # cross-compiles druntime, then Phobos, with the dmd built above.
