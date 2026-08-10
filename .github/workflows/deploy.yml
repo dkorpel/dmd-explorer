@@ -21,13 +21,13 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
   SOURCE_REPO: dkorpel/dmd
   SOURCE_REF: wasm-web-app
-  SOURCE_PATH: compiler/wasm/web
+  SOURCE_PATH: dmd/compiler/wasm/web
   PHOBOS_REPO: dlang/phobos
   PHOBOS_REF: master
-  # LDC version used to build the wasm module (matches local dev: LLVM 21).
-  LDC_VERSION: ldc-1.42.0
-  # wasi-sdk release whose sysroot provides wasm32-wasi/libc.a.
-  WASI_SDK_VERSION: "24"
+  # Host compiler that bootstraps the dmd used to cross-compile to wasm.
+  HOST_COMPILER: ldc-1.42.0
+  # Binaryen release providing wasm-opt, which shrinks the published module.
+  BINARYEN_VERSION: "123"
 
 jobs:
   deploy:
@@ -36,14 +36,16 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     runs-on: ubuntu-latest
     steps:
+      # dmd and phobos must be siblings: phobos's Makefile builds against
+      # ../dmd, and the generated dmd.conf resolves the wasm library path
+      # relative to the dmd binary as ../../../../../phobos.
       - name: Check out dmd
         uses: actions/checkout@v4
         with:
           repository: ${{ env.SOURCE_REPO }}
           ref: ${{ env.SOURCE_REF }}
+          path: dmd
 
-      # Phobos lives in a separate repo (druntime ships inside dmd). build.sh
-      # bakes std/ + etc/ into druntime_embed.d, so it needs PHOBOS_ROOT.
       - name: Check out Phobos
         uses: actions/checkout@v4
         with:
@@ -51,23 +53,45 @@ jobs:
           ref: ${{ env.PHOBOS_REF }}
           path: phobos
 
-      - name: Install LDC
+      # Only used to compile dmd itself; the wasm code generation is done by
+      # dmd's own wasm backend.
+      - name: Install host D compiler
         uses: dlang-community/setup-dlang@v2
         with:
-          compiler: ${{ env.LDC_VERSION }}
+          compiler: ${{ env.HOST_COMPILER }}
 
-      - name: Install wasi sysroot
+      - name: Install wasm-opt
         run: |
           set -eux
-          url="https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-${WASI_SDK_VERSION}/wasi-sysroot-${WASI_SDK_VERSION}.0.tar.gz"
-          curl -fL -o wasi-sysroot.tar.gz "$url"
-          mkdir -p "$RUNNER_TEMP/wasi-sysroot"
-          tar -xzf wasi-sysroot.tar.gz -C "$RUNNER_TEMP/wasi-sysroot" --strip-components=1
-          libc="$(find "$RUNNER_TEMP/wasi-sysroot" -path '*wasm32-wasi/libc.a' | head -1)"
-          test -n "$libc"
-          echo "WASI_LIBC=$libc" >> "$GITHUB_ENV"
+          url="https://github.com/WebAssembly/binaryen/releases/download/version_${BINARYEN_VERSION}/binaryen-version_${BINARYEN_VERSION}-x86_64-linux.tar.gz"
+          curl -fL -o binaryen.tar.gz "$url"
+          mkdir -p "$RUNNER_TEMP/binaryen"
+          tar -xzf binaryen.tar.gz -C "$RUNNER_TEMP/binaryen" --strip-components=1
+          echo "$RUNNER_TEMP/binaryen/bin" >> "$GITHUB_PATH"
+
+      # wasm-ld comes from LLVM; the runner image ships it as wasm-ld-<version>.
+      - name: Install wasm-ld
+        run: |
+          set -eux
+          sudo apt-get update
+          sudo apt-get install -y lld
+          test -x /usr/bin/wasm-ld || sudo ln -s "$(ls /usr/bin/wasm-ld-* | tail -1)" /usr/bin/wasm-ld
+          wasm-ld --version
+
+      - name: Build dmd
+        working-directory: dmd
+        run: ./compiler/src/build.d
+
+      # Fetches the pinned wasi-sdk sysroot (libc.a + the mmap emulation) and
+      # cross-compiles druntime, then Phobos, with the dmd built above.
+      - name: Build wasm druntime and Phobos
+        run: |
+          set -eux
+          make -C dmd/druntime wasm -j$(nproc)
+          make -C phobos wasm -j$(nproc)
 
       - name: Build dmd.wasm
+        working-directory: dmd
         run: ./compiler/wasm/build.sh
         env:
           PHOBOS_ROOT: ${{ github.workspace }}/phobos
