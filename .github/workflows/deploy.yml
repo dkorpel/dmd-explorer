@@ -98,6 +98,8 @@ jobs:
         run: ./compiler/wasm/build.sh
         env:
           PHOBOS_ROOT: ${{ github.workspace }}/phobos
+          # setup-dlang exports DMD=ldmd2; build.sh needs the dmd built above.
+          DMD: ${{ github.workspace }}/dmd/generated/linux/release/64/dmd
 
       - name: Configure Pages
         uses: actions/configure-pages@v5
