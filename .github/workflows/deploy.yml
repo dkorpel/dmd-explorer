@@ -22,8 +22,8 @@ env:
   SOURCE_REPO: dkorpel/dmd
   SOURCE_REF: wasm-web-app
   SOURCE_PATH: dmd/compiler/wasm/web
-  PHOBOS_REPO: dlang/phobos
-  PHOBOS_REF: master
+  PHOBOS_REPO: dkorpel/phobos
+  PHOBOS_REF: wasm
   # Host compiler that bootstraps the dmd used to cross-compile to wasm.
   HOST_COMPILER: ldc-1.42.0
   # Binaryen release providing wasm-opt, which shrinks the published module.
