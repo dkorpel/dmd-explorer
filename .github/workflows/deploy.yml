@@ -74,7 +74,9 @@ jobs:
         run: |
           set -eux
           sudo apt-get update
-          sudo apt-get install -y lld
+          # gcc-multilib: dmd runs the host cpp with -m32 to preprocess ImportC
+          # sources for wasm32, which needs the 32-bit glibc headers.
+          sudo apt-get install -y lld gcc-multilib
           test -x /usr/bin/wasm-ld || sudo ln -s "$(ls /usr/bin/wasm-ld-* | tail -1)" /usr/bin/wasm-ld
           wasm-ld --version
 
