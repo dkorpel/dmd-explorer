@@ -26,6 +26,9 @@ env:
   PHOBOS_REF: wasm
   # Host compiler that bootstraps the dmd used to cross-compile to wasm.
   HOST_COMPILER: ldc-1.42.0
+  # wasm-ld providing the __heap_end / __wasm_first_page_end symbols wasi-libc
+  # needs; LLVM 21 is the first release that synthesizes them.
+  LLVM_VERSION: "21"
   # Binaryen release providing wasm-opt, which shrinks the published module.
   BINARYEN_VERSION: "123"
 
@@ -76,8 +79,16 @@ jobs:
           sudo apt-get update
           # gcc-multilib: dmd runs the host cpp with -m32 to preprocess ImportC
           # sources for wasm32, which needs the 32-bit glibc headers.
-          sudo apt-get install -y lld gcc-multilib
-          test -x /usr/bin/wasm-ld || sudo ln -s "$(ls /usr/bin/wasm-ld-* | tail -1)" /usr/bin/wasm-ld
+          sudo apt-get install -y gcc-multilib
+          # wasi-libc's malloc/sbrk need the __heap_end and __wasm_first_page_end
+          # symbols wasm-ld only synthesizes from LLVM 21 on; the distro lld is
+          # older, and linking against it yields a module whose every allocation
+          # past the pre-committed heap fails at runtime. Install upstream LLVM.
+          curl -fsSL https://apt.llvm.org/llvm.sh -o llvm.sh
+          chmod +x llvm.sh
+          sudo ./llvm.sh ${LLVM_VERSION}
+          sudo apt-get install -y lld-${LLVM_VERSION}
+          sudo ln -sf /usr/bin/wasm-ld-${LLVM_VERSION} /usr/bin/wasm-ld
           wasm-ld --version
 
       # setup-dlang exports $DMD (ldmd2); build.d looks for HOST_DMD.
