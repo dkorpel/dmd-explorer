@@ -63,8 +63,12 @@ Builds are made on demand, one PR at a time, never for every open PR.
 The PR's diff (merge base to head) is applied on top of the explorer branch,
 which is upstream `master` plus the wasm backend and the explorer. A PR that
 touches code the explorer branch also changed, or that depends on newer
-`master` commits, fails to apply; the job log names the conflicting files, and
-the fix is to rebase `wasm-web-app` onto a newer `master`.
+`master` commits, fails to apply; the job log names the conflicting files.
+Either merge a newer `master` into `wasm-web-app`, or resolve the conflicts by
+hand: run `trypr.sh N` locally, fix the files it names in `tmp/prbuild/dmd`,
+commit that tree to a branch, push it to `dkorpel/dmd`, and run **Build PR**
+with that branch as `ref` and `preapplied` ticked (the workflow then skips
+applying the diff). Locally, `trypr.sh --no-apply N` builds the resolved tree.
 
 Builds of merged or closed PRs are pruned the next time any workflow updates
 the site. To drop one by hand, run **Build PR** with action `remove`.

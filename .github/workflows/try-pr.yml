@@ -1,3 +1,5 @@
+  ACTION: ${{ inputs.action || github.event.client_payload.action || 'build' }}
+  NOAPPLY: ${{ (inputs.preapplied || github.event.client_payload.preapplied) && '--no-apply' || '' }}
 name: Build PR
 run-name: "Build PR #${{ inputs.pr || github.event.client_payload.pr }} (${{ inputs.action || github.event.client_payload.action || 'build' }})"
 
@@ -26,6 +28,10 @@ on:
         default: build
         type: choice
         options: [build, remove]
+      preapplied:
+        description: ref already contains the PR (hand-resolved conflicts); skip applying its diff
+        default: false
+        type: boolean
   repository_dispatch:
     types: [try-pr]
 
@@ -74,7 +80,7 @@ jobs:
 
       - name: Build dmd.wasm from the PR
         if: env.ACTION == 'build'
-        run: sh dmd/compiler/wasm/trypr.sh --in-place --repo "$PR_REPO" --out "$RUNNER_TEMP/pr/$PR" "$PR"
+        run: sh dmd/compiler/wasm/trypr.sh --in-place $NOAPPLY --repo "$PR_REPO" --out "$RUNNER_TEMP/pr/$PR" "$PR"
         env:
           GH_TOKEN: ${{ github.token }}
           HOST_DMD: ${{ env.DMD }}
