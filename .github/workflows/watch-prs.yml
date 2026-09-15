@@ -1,0 +1,44 @@
+name: Watch labeled PRs
+run-name: "Watch ${{ inputs.repo || 'dlang/dmd' }} for '${{ inputs.label || 'try-it' }}'"
+
+# Every half hour: build every open PR of dlang/dmd that carries the try-it
+# label (or rebuild it when its head moved), and remove builds whose label
+# went away. Nothing runs upstream; this only reads dlang/dmd through the
+# public API and dispatches try-pr.yml here.
+on:
+  schedule:
+    - cron: "17,47 * * * *"
+  workflow_dispatch:
+    inputs:
+      repo:
+        description: Repository to watch
+        default: dlang/dmd
+        type: string
+      label:
+        description: Label that requests a build
+        default: try-it
+        type: string
+      dry_run:
+        description: Only report what would be dispatched
+        default: false
+        type: boolean
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: watch-prs
+  cancel-in-progress: false
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: sh scripts/watch-prs.sh | tee -a "$GITHUB_STEP_SUMMARY"
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_REPO: ${{ inputs.repo || 'dlang/dmd' }}
+          WATCH_LABEL: ${{ inputs.label || 'try-it' }}
+          DRY_RUN: ${{ inputs.dry_run && '1' || '' }}

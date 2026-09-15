@@ -88,6 +88,28 @@ That creates worktrees under `tmp/prbuild/`, builds everything there and
 writes `compiler/wasm/web/pr/23803/`. The workflow runs the same script with
 `--in-place`.
 
+### Automatically, from a label
+
+`watch-prs.yml` runs twice an hour (or on demand, with a dry-run option). It
+lists the open `dlang/dmd` PRs carrying the `try-it` label and compares them
+with `pr/index.json` on the site branch:
+
+- a labeled PR without a build, or whose head moved since the build, gets
+  `try-pr.yml` dispatched with `source=label`;
+- a build with `"source":"label"` whose PR lost the label or was closed is
+  removed;
+- builds whose conflicts were resolved by hand (`"applied":"manual"`) are
+  never rebuilt automatically; the run reports the new head instead.
+
+Nothing has to be installed upstream: the label just has to exist in
+`dlang/dmd`, everything else reads the public API from here. Builds started
+by hand (`source=manual`, the default) are left alone when the label goes;
+they disappear when the PR is merged or closed like any other build.
+
+```sh
+GH_TOKEN=$(gh auth token) DRY_RUN=1 sh scripts/watch-prs.sh   # what would be dispatched
+```
+
 ### From another repository
 
 `try-pr.yml` also accepts a `repository_dispatch` event, so a workflow in

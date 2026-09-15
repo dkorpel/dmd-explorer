@@ -4,8 +4,9 @@ run-name: "Build PR #${{ inputs.pr || github.event.client_payload.pr }} (${{ inp
 # Builds dmd.wasm from a dlang/dmd pull request applied on top of the explorer
 # branch and hosts it at <site>/?pr=<N>. Triggered by hand (Run workflow), by
 # `gh workflow run try-pr.yml -f pr=N`, or by a repository_dispatch event of
-# type try-pr with client_payload {pr, repo?, ref?, action?} so another repo's
-# automation can request builds.
+# type try-pr with client_payload {pr, repo?, ref?, action?, preapplied?, source?}
+# so another repo's automation can request builds. watch-prs.yml dispatches it
+# for PRs carrying the try-it label.
 on:
   workflow_dispatch:
     inputs:
@@ -30,6 +31,11 @@ on:
         description: ref already contains the PR (hand-resolved conflicts); skip applying its diff
         default: false
         type: boolean
+      source:
+        description: who asked for this build (label = the PR watcher owns it and removes it when the label goes)
+        default: manual
+        type: choice
+        options: [manual, label]
   repository_dispatch:
     types: [try-pr]
 
@@ -50,6 +56,7 @@ env:
   PHOBOS_REF: wasm
   ACTION: ${{ inputs.action || github.event.client_payload.action || 'build' }}
   NOAPPLY: ${{ (inputs.preapplied || github.event.client_payload.preapplied) && '--no-apply' || '' }}
+  TRYPR_SOURCE: ${{ inputs.source || github.event.client_payload.source || 'manual' }}
   PAGES_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/
 
 jobs:
