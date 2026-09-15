@@ -50,10 +50,13 @@ case "$CMD" in
 esac
 
 rm -rf "$SITE"
-if ! git clone -q --depth 1 -b "$BRANCH" "$URL" "$SITE" 2>/dev/null; then
-  echo "branch $BRANCH does not exist yet; creating it"
-  git init -q "$SITE"
-fi
+rc=0
+git ls-remote --exit-code --heads "$URL" "$BRANCH" >/dev/null || rc=$?
+case "$rc" in
+  0) git clone -q --depth 1 -b "$BRANCH" "$URL" "$SITE" ;;
+  2) echo "branch $BRANCH does not exist yet; creating it"; git init -q "$SITE" ;;
+  *) echo "cannot list branches of $REPO (git ls-remote exit $rc)" >&2; exit 1 ;;
+esac
 cd "$SITE"
 
 if [ "$CMD" != main ] && [ ! -f index.html ]; then
