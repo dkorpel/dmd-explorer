@@ -67,7 +67,7 @@ jobs:
           DMD: ${{ github.workspace }}/dmd/generated/linux/release/64/dmd
 
       - name: Update the site branch
-        run: scripts/site-update.sh main "$SOURCE_PATH"
+        run: sh scripts/site-update.sh main "$SOURCE_PATH"
         env:
           GITHUB_TOKEN: ${{ github.token }}
           GH_TOKEN: ${{ github.token }}

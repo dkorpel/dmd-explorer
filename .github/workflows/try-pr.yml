@@ -74,7 +74,7 @@ jobs:
 
       - name: Build dmd.wasm from the PR
         if: env.ACTION == 'build'
-        run: dmd/compiler/wasm/trypr.sh --in-place --repo "$PR_REPO" --out "$RUNNER_TEMP/pr/$PR" "$PR"
+        run: sh dmd/compiler/wasm/trypr.sh --in-place --repo "$PR_REPO" --out "$RUNNER_TEMP/pr/$PR" "$PR"
         env:
           GH_TOKEN: ${{ github.token }}
           HOST_DMD: ${{ env.DMD }}
@@ -82,14 +82,14 @@ jobs:
 
       - name: Add the build to the site branch
         if: env.ACTION == 'build'
-        run: scripts/site-update.sh pr "$PR" "$RUNNER_TEMP/pr/$PR"
+        run: sh scripts/site-update.sh pr "$PR" "$RUNNER_TEMP/pr/$PR"
         env:
           GITHUB_TOKEN: ${{ github.token }}
           GH_TOKEN: ${{ github.token }}
 
       - name: Remove the build from the site branch
         if: env.ACTION == 'remove'
-        run: scripts/site-update.sh remove-pr "$PR"
+        run: sh scripts/site-update.sh remove-pr "$PR"
         env:
           GITHUB_TOKEN: ${{ github.token }}
           GH_TOKEN: ${{ github.token }}
