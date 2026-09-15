@@ -1,0 +1,121 @@
+name: Build PR
+run-name: "Build PR #${{ inputs.pr || github.event.client_payload.pr }} (${{ inputs.action || github.event.client_payload.action || 'build' }})"
+
+# Builds dmd.wasm from a dlang/dmd pull request applied on top of the explorer
+# branch and hosts it at <site>/?pr=<N>. Triggered by hand (Run workflow), by
+# `gh workflow run try-pr.yml -f pr=N`, or by a repository_dispatch event of
+# type try-pr with client_payload {pr, repo?, ref?, action?} so another repo's
+# automation can request builds.
+on:
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: Pull request number
+        required: true
+        type: string
+      repo:
+        description: Repository the PR belongs to
+        default: dlang/dmd
+        type: string
+      ref:
+        description: Explorer branch of dkorpel/dmd to apply the PR to
+        default: wasm-web-app
+        type: string
+      action:
+        description: build the PR, or remove its build from the site
+        default: build
+        type: choice
+        options: [build, remove]
+  repository_dispatch:
+    types: [try-pr]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: site
+  cancel-in-progress: false
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+  PR: ${{ inputs.pr || github.event.client_payload.pr }}
+  PR_REPO: ${{ inputs.repo || github.event.client_payload.repo || 'dlang/dmd' }}
+  SOURCE_REPO: dkorpel/dmd
+  SOURCE_REF: ${{ inputs.ref || github.event.client_payload.ref || 'wasm-web-app' }}
+  PHOBOS_REPO: dkorpel/phobos
+  PHOBOS_REF: wasm
+  ACTION: ${{ inputs.action || github.event.client_payload.action || 'build' }}
+  SITE_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check out dmd
+        if: env.ACTION == 'build'
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.SOURCE_REPO }}
+          ref: ${{ env.SOURCE_REF }}
+          path: dmd
+
+      - name: Check out Phobos
+        if: env.ACTION == 'build'
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.PHOBOS_REPO }}
+          ref: ${{ env.PHOBOS_REF }}
+          path: phobos
+
+      - if: env.ACTION == 'build'
+        uses: ./.github/actions/setup-toolchain
+
+      - name: Build dmd.wasm from the PR
+        if: env.ACTION == 'build'
+        run: dmd/compiler/wasm/trypr.sh --in-place --repo "$PR_REPO" --out "$RUNNER_TEMP/pr/$PR" "$PR"
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HOST_DMD: ${{ env.DMD }}
+          PHOBOS_ROOT: ${{ github.workspace }}/phobos
+
+      - name: Add the build to the site branch
+        if: env.ACTION == 'build'
+        run: scripts/site-update.sh pr "$PR" "$RUNNER_TEMP/pr/$PR"
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Remove the build from the site branch
+        if: env.ACTION == 'remove'
+        run: scripts/site-update.sh remove-pr "$PR"
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Summary
+        run: |
+          if [ "$ACTION" = build ]; then
+            echo "Try ${PR_REPO}#${PR} at ${SITE_URL}?pr=${PR} once the publish job finishes." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Removed the build of ${PR_REPO}#${PR} from the site." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      # Optional: with a PR_COMMENT_TOKEN secret that can comment on $PR_REPO,
+      # tell the PR where its build lives.
+      - name: Comment on the PR
+        if: env.ACTION == 'build'
+        env:
+          GH_TOKEN: ${{ secrets.PR_COMMENT_TOKEN }}
+        run: |
+          [ -n "$GH_TOKEN" ] || exit 0
+          gh pr comment "$PR" -R "$PR_REPO" --body "Try this PR in the DMD explorer: ${SITE_URL}?pr=${PR}"
+
+  publish:
+    needs: build
+    uses: ./.github/workflows/publish.yml
+    permissions:
+      contents: read
+      pages: write
+      id-token: write

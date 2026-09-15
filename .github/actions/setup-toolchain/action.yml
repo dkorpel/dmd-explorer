@@ -1,0 +1,44 @@
+name: Set up the wasm toolchain
+description: Host D compiler, wasm-opt, an LLVM 21 wasm-ld and the 32-bit glibc headers ImportC needs
+inputs:
+  host-compiler:
+    description: Host D compiler that bootstraps the dmd used to cross-compile to wasm
+    default: ldc-1.42.0
+  llvm-version:
+    description: wasm-ld release; LLVM 21 is the first that synthesizes __heap_end / __wasm_first_page_end for wasi-libc
+    default: "21"
+  binaryen-version:
+    description: Binaryen release providing wasm-opt
+    default: "123"
+runs:
+  using: composite
+  steps:
+    - uses: dlang-community/setup-dlang@v2
+      with:
+        compiler: ${{ inputs.host-compiler }}
+
+    - name: Install wasm-opt
+      shell: bash
+      env:
+        V: ${{ inputs.binaryen-version }}
+      run: |
+        set -eux
+        curl -fL -o binaryen.tar.gz "https://github.com/WebAssembly/binaryen/releases/download/version_${V}/binaryen-version_${V}-x86_64-linux.tar.gz"
+        mkdir -p "$RUNNER_TEMP/binaryen"
+        tar -xzf binaryen.tar.gz -C "$RUNNER_TEMP/binaryen" --strip-components=1
+        echo "$RUNNER_TEMP/binaryen/bin" >> "$GITHUB_PATH"
+
+    - name: Install wasm-ld and the 32-bit glibc headers
+      shell: bash
+      env:
+        V: ${{ inputs.llvm-version }}
+      run: |
+        set -eux
+        sudo apt-get update
+        sudo apt-get install -y gcc-multilib
+        curl -fsSL https://apt.llvm.org/llvm.sh -o llvm.sh
+        chmod +x llvm.sh
+        sudo ./llvm.sh "$V"
+        sudo apt-get install -y "lld-$V"
+        sudo ln -sf "/usr/bin/wasm-ld-$V" /usr/bin/wasm-ld
+        wasm-ld --version

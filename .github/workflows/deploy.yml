@@ -1,44 +1,32 @@
 name: Deploy to GitHub Pages
 
-# Manual deploy: builds dmd.wasm from the dkorpel/dmd wasm-web-app branch and
-# publishes compiler/wasm/web as a static GitHub Pages site.
+# Manual deploy: builds dmd.wasm from the dkorpel/dmd wasm-web-app branch,
+# stores compiler/wasm/web in the `site` branch (keeping the PR builds under
+# pr/) and publishes that branch to Pages.
 on:
   workflow_dispatch:
 
-# Allow the workflow to deploy to Pages via OIDC.
 permissions:
-  contents: read
-  pages: write
-  id-token: write
+  contents: write
 
-# Only one concurrent deploy; don't cancel an in-progress one.
 concurrency:
-  group: pages
+  group: site
   cancel-in-progress: false
 
 env:
-  # Run the JS actions below on Node 24 (Node 20 is deprecated on the runners).
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
   SOURCE_REPO: dkorpel/dmd
   SOURCE_REF: wasm-web-app
   SOURCE_PATH: dmd/compiler/wasm/web
   PHOBOS_REPO: dkorpel/phobos
   PHOBOS_REF: wasm
-  # Host compiler that bootstraps the dmd used to cross-compile to wasm.
-  HOST_COMPILER: ldc-1.42.0
-  # wasm-ld providing the __heap_end / __wasm_first_page_end symbols wasi-libc
-  # needs; LLVM 21 is the first release that synthesizes them.
-  LLVM_VERSION: "21"
-  # Binaryen release providing wasm-opt, which shrinks the published module.
-  BINARYEN_VERSION: "123"
 
 jobs:
-  deploy:
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
+  build:
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+
       # dmd and phobos must be siblings: phobos's Makefile builds against
       # ../dmd, and the generated dmd.conf resolves the wasm library path
       # relative to the dmd binary as ../../../../../phobos.
@@ -56,40 +44,7 @@ jobs:
           ref: ${{ env.PHOBOS_REF }}
           path: phobos
 
-      # Only used to compile dmd itself; the wasm code generation is done by
-      # dmd's own wasm backend.
-      - name: Install host D compiler
-        uses: dlang-community/setup-dlang@v2
-        with:
-          compiler: ${{ env.HOST_COMPILER }}
-
-      - name: Install wasm-opt
-        run: |
-          set -eux
-          url="https://github.com/WebAssembly/binaryen/releases/download/version_${BINARYEN_VERSION}/binaryen-version_${BINARYEN_VERSION}-x86_64-linux.tar.gz"
-          curl -fL -o binaryen.tar.gz "$url"
-          mkdir -p "$RUNNER_TEMP/binaryen"
-          tar -xzf binaryen.tar.gz -C "$RUNNER_TEMP/binaryen" --strip-components=1
-          echo "$RUNNER_TEMP/binaryen/bin" >> "$GITHUB_PATH"
-
-      # wasm-ld comes from LLVM; the runner image ships it as wasm-ld-<version>.
-      - name: Install wasm-ld
-        run: |
-          set -eux
-          sudo apt-get update
-          # gcc-multilib: dmd runs the host cpp with -m32 to preprocess ImportC
-          # sources for wasm32, which needs the 32-bit glibc headers.
-          sudo apt-get install -y gcc-multilib
-          # wasi-libc's malloc/sbrk need the __heap_end and __wasm_first_page_end
-          # symbols wasm-ld only synthesizes from LLVM 21 on; the distro lld is
-          # older, and linking against it yields a module whose every allocation
-          # past the pre-committed heap fails at runtime. Install upstream LLVM.
-          curl -fsSL https://apt.llvm.org/llvm.sh -o llvm.sh
-          chmod +x llvm.sh
-          sudo ./llvm.sh ${LLVM_VERSION}
-          sudo apt-get install -y lld-${LLVM_VERSION}
-          sudo ln -sf /usr/bin/wasm-ld-${LLVM_VERSION} /usr/bin/wasm-ld
-          wasm-ld --version
+      - uses: ./.github/actions/setup-toolchain
 
       # setup-dlang exports $DMD (ldmd2); build.d looks for HOST_DMD.
       - name: Build dmd
@@ -109,17 +64,18 @@ jobs:
         run: ./compiler/wasm/build.sh
         env:
           PHOBOS_ROOT: ${{ github.workspace }}/phobos
-          # setup-dlang exports DMD=ldmd2; build.sh needs the dmd built above.
           DMD: ${{ github.workspace }}/dmd/generated/linux/release/64/dmd
 
-      - name: Configure Pages
-        uses: actions/configure-pages@v5
+      - name: Update the site branch
+        run: scripts/site-update.sh main "$SOURCE_PATH"
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ github.token }}
 
-      - name: Upload artifact
-        uses: actions/upload-pages-artifact@v3
-        with:
-          path: ${{ env.SOURCE_PATH }}
-
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v4
+  publish:
+    needs: build
+    uses: ./.github/workflows/publish.yml
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
