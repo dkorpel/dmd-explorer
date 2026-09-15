@@ -1,5 +1,3 @@
-  ACTION: ${{ inputs.action || github.event.client_payload.action || 'build' }}
-  NOAPPLY: ${{ (inputs.preapplied || github.event.client_payload.preapplied) && '--no-apply' || '' }}
 name: Build PR
 run-name: "Build PR #${{ inputs.pr || github.event.client_payload.pr }} (${{ inputs.action || github.event.client_payload.action || 'build' }})"
 
@@ -51,6 +49,7 @@ env:
   PHOBOS_REPO: dkorpel/phobos
   PHOBOS_REF: wasm
   ACTION: ${{ inputs.action || github.event.client_payload.action || 'build' }}
+  NOAPPLY: ${{ (inputs.preapplied || github.event.client_payload.preapplied) && '--no-apply' || '' }}
   PAGES_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/
 
 jobs:
