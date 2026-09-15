@@ -45,7 +45,7 @@ env:
   PHOBOS_REPO: dkorpel/phobos
   PHOBOS_REF: wasm
   ACTION: ${{ inputs.action || github.event.client_payload.action || 'build' }}
-  SITE_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/
+  PAGES_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/
 
 jobs:
   build:
@@ -97,7 +97,7 @@ jobs:
       - name: Summary
         run: |
           if [ "$ACTION" = build ]; then
-            echo "Try ${PR_REPO}#${PR} at ${SITE_URL}?pr=${PR} once the publish job finishes." >> "$GITHUB_STEP_SUMMARY"
+            echo "Try ${PR_REPO}#${PR} at ${PAGES_URL}?pr=${PR} once the publish job finishes." >> "$GITHUB_STEP_SUMMARY"
           else
             echo "Removed the build of ${PR_REPO}#${PR} from the site." >> "$GITHUB_STEP_SUMMARY"
           fi
@@ -110,7 +110,7 @@ jobs:
           GH_TOKEN: ${{ secrets.PR_COMMENT_TOKEN }}
         run: |
           [ -n "$GH_TOKEN" ] || exit 0
-          gh pr comment "$PR" -R "$PR_REPO" --body "Try this PR in the DMD explorer: ${SITE_URL}?pr=${PR}"
+          gh pr comment "$PR" -R "$PR_REPO" --body "Try this PR in the DMD explorer: ${PAGES_URL}?pr=${PR}"
 
   publish:
     needs: build
