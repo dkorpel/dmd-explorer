@@ -1,0 +1,1 @@
+[{"label":"compilable/traits_initSymbol_ctfe.d","file":"examples/compilable_traits_initSymbol_ctfe.d","panes":"sema,diag"},{"label":"fail_compilation/traits_initSymbol.d","file":"examples/fail_compilation_traits_initSymbol.d","panes":"diag"}]
