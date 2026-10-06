@@ -1,0 +1,1 @@
+[{"label":"fail_compilation/fastdfa.d","file":"examples/fail_compilation_fastdfa.d","panes":"diag"},{"label":"fail_compilation/sumtypematching.d","file":"examples/fail_compilation_sumtypematching.d","panes":"diag"},{"label":"runnable/sumtypematching.d","file":"examples/runnable_sumtypematching.d","panes":"run,diag"}]

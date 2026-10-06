@@ -1,0 +1,1208 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<link rel="icon" type="image/png" href="icon.png" />
+<link rel="stylesheet" href="aero.css" />
+<!-- Set <html data-theme> before paint (OS default + saved choice); wires #themeToggle. -->
+<script src="theme.js"></script>
+<!-- In embed mode, hide the page before first paint so the reader never sees the
+     full chrome + all panes flash before applyEmbed() trims to the requested slice. -->
+<script>if (new URLSearchParams(location.search).has("embed")) document.documentElement.classList.add("embed-boot");</script>
+<style>html.embed-boot body { visibility: hidden; }</style>
+<title>DMD explorer</title>
+<!--
+  Import map pinning CodeMirror 6 as ES modules from a CDN
+-->
+<script type="importmap">
+{
+  "imports": {
+    "@codemirror/state":        "https://esm.sh/@codemirror/state@6?external=@codemirror/state,@codemirror/view,@codemirror/language,@codemirror/commands,@codemirror/autocomplete,@codemirror/search,@codemirror/lint,@lezer/common,@lezer/highlight,@lezer/lr",
+    "@codemirror/view":         "https://esm.sh/@codemirror/view@6?external=@codemirror/state,@codemirror/view,@codemirror/language,@codemirror/commands,@codemirror/autocomplete,@codemirror/search,@codemirror/lint,@lezer/common,@lezer/highlight,@lezer/lr",
+    "@codemirror/language":     "https://esm.sh/@codemirror/language@6?external=@codemirror/state,@codemirror/view,@codemirror/language,@codemirror/commands,@codemirror/autocomplete,@codemirror/search,@codemirror/lint,@lezer/common,@lezer/highlight,@lezer/lr",
+    "@codemirror/commands":     "https://esm.sh/@codemirror/commands@6?external=@codemirror/state,@codemirror/view,@codemirror/language,@codemirror/commands,@codemirror/autocomplete,@codemirror/search,@codemirror/lint,@lezer/common,@lezer/highlight,@lezer/lr",
+    "@codemirror/autocomplete": "https://esm.sh/@codemirror/autocomplete@6?external=@codemirror/state,@codemirror/view,@codemirror/language,@codemirror/commands,@codemirror/autocomplete,@codemirror/search,@codemirror/lint,@lezer/common,@lezer/highlight,@lezer/lr",
+    "@codemirror/search":       "https://esm.sh/@codemirror/search@6?external=@codemirror/state,@codemirror/view,@codemirror/language,@codemirror/commands,@codemirror/autocomplete,@codemirror/search,@codemirror/lint,@lezer/common,@lezer/highlight,@lezer/lr",
+    "@codemirror/lint":         "https://esm.sh/@codemirror/lint@6?external=@codemirror/state,@codemirror/view,@codemirror/language,@codemirror/commands,@codemirror/autocomplete,@codemirror/search,@codemirror/lint,@lezer/common,@lezer/highlight,@lezer/lr",
+    "@lezer/common":            "https://esm.sh/@lezer/common@1",
+    "@lezer/highlight":         "https://esm.sh/@lezer/highlight@1?external=@lezer/common",
+    "@lezer/lr":                "https://esm.sh/@lezer/lr@1?external=@lezer/common"
+  }
+}
+</script>
+<style>
+  body { font: 14px/1.4 system-ui, sans-serif; margin: 0;
+         display: flex; flex-direction: column; min-height: 100vh; }
+  /* Two header rows: controls on top, the tab strip pinned to the header's lower
+     edge so it stays connected to the pane row beneath it at any window width.
+     Drop the header's bottom border/shadow for the same reason. */
+  header { padding: 8px 16px 0; display: flex; flex-direction: column; gap: 8px;
+           border-bottom: 0; box-shadow: none; }
+  .hdr-row { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+  header h1 { font-size: 16px; margin: 0; font-weight: 600; white-space: nowrap; }
+  #status { color: var(--aero-text-dim); font-size: 12px; }
+  /* Busy spinner shown while dmd.wasm compiles (in a Web Worker, off the main
+     thread, so the page stays responsive and this animates smoothly). */
+  #spinner { width: 13px; height: 13px; border-radius: 50%;
+             border: 2px solid var(--aero-edge); border-top-color: var(--code-kw);
+             animation: spin .6s linear infinite; }
+  #spinner[hidden] { display: none; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  #updated { color: var(--aero-text-dim); font-size: 12px; margin-left: auto; white-space: nowrap; }
+  a.prlink { font: 12px system-ui; color: var(--code-kw); text-decoration: none; white-space: nowrap;
+             max-width: 40ch; overflow: hidden; text-overflow: ellipsis; }
+  a.prlink:hover { text-decoration: underline; }
+  a.prlink[hidden] { display: none; }
+  #prDialog { background: var(--aero-panel); color: var(--aero-text); border: 1px solid var(--aero-edge);
+              border-radius: 8px; padding: 14px 18px; font: 13px system-ui; max-width: 62ch; }
+  #prDialog::backdrop { background: rgba(0,0,0,.4); }
+  #prDialog h3 { margin: 0 0 8px; font-size: 14px; }
+  #prDialog p { margin: 6px 0; line-height: 1.4; }
+  #prDialog input { width: 9ch; font: inherit; }
+  #prDialog ul { margin: 4px 0 10px; padding-left: 18px; max-height: 12em; overflow: auto; }
+  #prDialog code { font: 12px ui-monospace, monospace; background: var(--code-inline-bg);
+                   color: var(--code-inline-fg); padding: 1px 4px; border-radius: 3px; }
+  #prDialog a { color: var(--code-kw); }
+  .toolbar { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .toolbar .group { display: flex; align-items: center; gap: 4px; }
+  .toolbar .sep { width: 1px; align-self: stretch; margin: 2px 6px;
+                  background: linear-gradient(180deg, transparent, rgba(255,255,255,.4), transparent); }
+  .toolbar label { font-size: 11px; color: var(--aero-text-dim); text-transform: uppercase; }
+  .chip { font: 12px system-ui; padding: 4px 10px; color: var(--aero-text);
+          background: var(--aero-glass);
+          border: 1px solid var(--aero-edge); border-radius: 6px; cursor: pointer; user-select: none;
+          box-shadow: var(--aero-gloss), 0 1px 2px rgba(0,0,0,.15); }
+  .chip[aria-pressed="true"] { color: #fff;
+          background: var(--aero-glass-on);
+          border-color: #7e2620;
+          box-shadow: inset 0 1px 0 rgba(255,255,255,.25), 0 1px 2px rgba(0,0,0,.3); }
+  .chip:hover { border-color: var(--aero-edge-hi);
+          box-shadow: var(--aero-gloss), var(--aero-glow); }
+  select.chip { cursor: pointer; }
+  /* Pane toggles rendered as skeuomorphic folder tabs: trapezoidal (slanted
+     sides via clip-path), a convex top-lit gradient, and a drop-shadow that
+     follows the slant. Tabs overlap slightly so their slants interlock. */
+  /* Browser-style tab strip: never wraps, scrolls horizontally when the tabs
+     don't fit. The 3px top padding keeps the active tab's drop-shadow from being
+     clipped by the scroll container, and the scrollbar itself is hidden. */
+  #paneToggles { display: flex; flex-wrap: nowrap; gap: 0; min-width: 0; padding-top: 3px;
+                 overflow-x: auto; overflow-y: hidden; overscroll-behavior-x: contain;
+                 scrollbar-width: none; -ms-overflow-style: none; }
+  #paneToggles::-webkit-scrollbar { display: none; }
+  /* Fade the edge the strip can still scroll towards, as a hint that there are
+     more tabs off-screen (the classes are maintained in JS). */
+  #paneToggles.can-left  { mask-image: linear-gradient(90deg, transparent 0, #000 24px); }
+  #paneToggles.can-right { mask-image: linear-gradient(270deg, transparent 0, #000 24px); }
+  #paneToggles.can-left.can-right {
+      mask-image: linear-gradient(90deg, transparent 0, #000 24px,
+                                  #000 calc(100% - 24px), transparent 100%); }
+  .tab { flex: 0 0 auto;
+         position: relative; font: 12px system-ui; padding: 6px 16px 7px; margin: 0 -3px;
+         color: var(--aero-text-2); white-space: nowrap; cursor: pointer; user-select: none;
+         border: 0;
+         background:
+           linear-gradient(180deg, var(--tab-hi) 0%, rgba(255,255,255,0) 48%),
+           var(--tab-bg);
+         /* gentle slant with chamfered (softly rounded) top corners */
+         clip-path: polygon(9px 0, calc(100% - 9px) 0, calc(100% - 6px) 4px,
+                            100% 100%, 0 100%, 6px 4px);
+         filter: drop-shadow(0 1px 1px rgba(0,0,0,.22)); }
+  .tab:first-child { margin-left: 0; }
+  .tab:hover { color: var(--aero-text); z-index: 2; }
+  .tab[aria-pressed="true"] { color: var(--aero-text-hi); z-index: 3;
+         background:
+           linear-gradient(180deg, var(--tab-hi-on) 0%, rgba(255,255,255,0) 48%),
+           var(--tab-bg-on);
+         box-shadow: inset 0 2px 0 var(--code-kw);
+         filter: drop-shadow(0 2px 2px rgba(0,0,0,.3)); }
+
+  /* Pane layout container: columns / rows / grid. */
+  .cols { display: flex; flex: 1; min-height: 0; }
+  .cols.rows { flex-direction: column; }
+  .cols.grid { display: grid; grid-auto-flow: row;
+               grid-template-columns: repeat(2, 1fr); grid-auto-rows: 1fr; }
+  .pane { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+  .cols:not(.grid) .pane + .pane { border-left: 1px solid var(--aero-line); }
+  .cols.rows .pane + .pane { border-left: 0; border-top: 1px solid var(--aero-line); }
+  .cols.grid .pane { border: 1px solid var(--aero-line); }
+  .pane[hidden] { display: none; }
+  .pane h2 { font-size: 12px; text-transform: uppercase; color: var(--aero-text-2); margin: 0;
+             padding: 6px 12px;
+             background: var(--aero-panel);
+             box-shadow: var(--aero-gloss);
+             display: flex; align-items: center; gap: 6px; }
+  /* Per-pane close shortcut (hides the pane; the top-bar toggle still re-shows it). */
+  /* Fill the full bar height and reach to the right edge (negative margins cancel
+     the h2 padding) so the whole right end is the X hitbox — no drag strip around it. */
+  .pane-close { margin: -6px -12px -6px auto; padding: 0 12px; align-self: stretch;
+                display: flex; align-items: center; background: none; border: 0;
+                color: #888; cursor: pointer; font: 14px/1 system-ui; }
+  .pane-close:hover { color: #b03931; background: rgba(176,57,49,.15); }
+  body.embed .pane-close { display: none; }
+  /* The D source pane is the editable input, not a read-only output — give it a
+     distinct surface, header and "editable" badge so it reads as primary. */
+  .pane[data-stage="source"] { box-shadow: inset 0 0 0 1px var(--aero-edge); }
+  .pane[data-stage="source"] h2 { color: var(--aero-text);
+      background: var(--aero-srchead); }
+  .pane[data-stage="source"] h2 .badge {
+      margin-left: auto; font-size: 10px; letter-spacing: .03em; text-transform: none;
+      color: var(--code-kw); border: 1px solid var(--aero-edge); border-radius: 10px; padding: 1px 8px; }
+  textarea, pre { flex: 1; margin: 0; padding: 12px; border: 0; font: 13px/1.45 ui-monospace, monospace;
+                  background: var(--aero-surface);
+                  color: var(--code-fg); white-space: pre; overflow: auto; tab-size: 4; }
+  textarea { resize: none; outline: none; }
+  /* Each rendered output line is its own block so the synced-line highlight can
+     span the full pane width (and cover horizontally-scrolled content). */
+  .ln { display: block; min-width: 100%; width: max-content; min-height: 1.45em; }
+  .ln[data-line] { cursor: pointer; }
+  /* Subtle translucent highlight with a short fade so moving the cursor between
+     lines doesn't produce hard flashes. */
+  .ln { transition: background-color 80ms ease-out; }
+  .ln.hl { background: rgba(64, 64, 220, 0.12); }
+  /* Read-only syntax highlight for the lowered-AST pane: same palette as the
+     editor, rendered as plain colored spans in a <pre> (no cursor/gutter) so it
+     stays clearly an output, not an editable field. */
+  #ast .tok-keyword  { color: var(--code-kw); }
+  #ast .tok-type     { color: var(--code-type); }
+  #ast .tok-comment  { color: var(--code-comment); font-style: italic; }
+  #ast .tok-string   { color: var(--code-string); }
+  #ast .tok-number   { color: var(--code-number); }
+  #ast .tok-meta     { color: var(--code-meta); }
+  #ast .tok-variable { color: var(--code-fg); }
+  /* CodeMirror editor host: fill the source pane between header and run bar. */
+  #src { flex: 1; min-height: 0; overflow: hidden; }
+  #src .cm-editor { height: 100%; }
+  /* ANSI terminal palette for the diagnostics pane (VS Code dark). */
+  .ansi-1 { font-weight: bold; }
+  .ansi-fg-0 { color: var(--diag-gray); }    .ansi-fg-1 { color: var(--diag-red); }
+  .ansi-fg-2 { color: var(--diag-green); }   .ansi-fg-3 { color: var(--diag-yellow); }
+  .ansi-fg-4 { color: var(--diag-blue); }    .ansi-fg-5 { color: var(--diag-magenta); }
+  .ansi-fg-6 { color: var(--diag-cyan); }    .ansi-fg-7 { color: var(--diag-fg); }
+  a.tour { font: 12px system-ui; color: var(--aero-text); text-decoration: none; white-space: nowrap;
+           padding: 4px 10px; border: 1px solid var(--aero-edge); border-radius: 6px;
+           background: var(--aero-glass-soft);
+           box-shadow: var(--aero-gloss); }
+  a.tour:hover { color: #fff; border-color: var(--aero-edge-hi);
+           background: var(--aero-glass-on);
+           box-shadow: inset 0 1px 0 rgba(255,255,255,.2), 0 1px 2px rgba(0,0,0,.25); }
+  /* Embedded mode: when the explorer is hosted in an <iframe> on the tour page
+     (index.html?embed=1&panes=…), drop the page chrome and let the chosen panes
+     fill the frame so a focused subset can sit inline next to the prose. */
+  body.embed header { display: none; }
+  body.embed .cols { height: 100vh; }
+  .embed-open { position: fixed; top: 6px; right: 8px; z-index: 5;
+      font: 11px system-ui; color: var(--code-kw); text-decoration: none;
+      background: var(--aero-glass); border: 1px solid var(--aero-edge);
+      border-radius: 4px; padding: 2px 8px; box-shadow: var(--aero-gloss);
+      cursor: pointer; user-select: none; -webkit-user-select: none; }
+  .embed-open:hover { background: #b03931; color: #fff; border-color: #98312a; }
+</style>
+</head>
+<body>
+<dialog id="prDialog">
+  <h3>Try a pull request</h3>
+  <p>dlang/dmd PR #<input id="prNum" type="number" min="1" placeholder="23803">
+     <button id="prOpen" class="chip" type="button">Open</button>
+     <button id="prMain" class="chip" type="button" hidden>Back to the main build</button></p>
+  <p>Hosted builds:</p>
+  <ul id="prList"><li>none yet</li></ul>
+  <p>To build another PR, open the
+     <a id="prBuildLink" href="#" target="_blank" rel="noopener">Build PR workflow</a>,
+     press <em>Run workflow</em> and enter the number, or run
+     <code>gh workflow run try-pr.yml -R dkorpel/dmd-explorer -f pr=N</code>.
+     It appears here after about five minutes.
+     Locally: <code>./compiler/wasm/trypr.sh N</code> on the wasm-web-app branch.</p>
+</dialog>
+<header>
+  <div class="hdr-row">
+    <h1>DMD explorer</h1>
+    <a class="tour" href="tour.html"
+       title="A guided tour of DMD's compiler passes and internal data structures, with links to the source">📖 Tour</a>
+    <div class="toolbar">
+      <div class="group">
+        <label>Examples</label>
+        <select id="examples" class="chip" title="Load a ready-made snippet">
+          <option value="" selected disabled hidden>Load an example…</option>
+        </select>
+      </div>
+      <div class="group">
+        <button id="runBtn" class="chip" type="button"
+                title="Compile the program to WebAssembly and run it in this page (Ctrl/⌘+Shift+Enter)">▶ Run</button>
+      </div>
+      <div class="group">
+        <button id="shareBtn" class="chip" type="button"
+                title="Copy a link to this page with the current source (and PR build) in the URL">🔗 Share</button>
+        <button id="prBtn" class="chip" type="button"
+                title="Run the compiler from a dlang/dmd pull request">PR…</button>
+      </div>
+    </div>
+    <span id="spinner" title="Compiling…" hidden></span>
+    <span id="status">loading dmd.wasm…</span>
+    <a id="prlink" class="prlink" hidden target="_blank" rel="noopener"></a>
+    <span id="updated" title="When the dmd.wasm build on this page was last deployed"></span>
+    <button id="themeToggle" class="theme-toggle" type="button" title="Toggle light/dark theme">☾</button>
+  </div>
+  <!-- Pane toggles: rendered as tabs on the header's bottom edge so they sit
+       flush against the pane row below (no maroon strip between). -->
+  <div class="group" id="paneToggles">
+    <!-- toggle tabs injected here -->
+  </div>
+</header>
+<div class="cols" id="cols">
+  <div class="pane" data-pane="src" data-stage="source" data-title="D source">
+    <h2>D source <span class="badge">✎ editable</span></h2>
+    <div id="src"></div>
+  </div>
+  <div class="pane" data-pane="lex" data-stage="parse" data-title="Tokens" data-tip="The token stream produced by the lexer">
+    <h2 title="Internal lexer output: one line per source line, listing that line's TOK enum member names.">Tokens (lexer)</h2>
+    <pre id="lex"></pre>
+  </div>
+  <div class="pane" data-pane="parse" data-stage="parse" data-title="Parse tree" data-tip="The Abstract Syntax Tree produced by the parser">
+    <h2>Parse tree (printAST)</h2>
+    <pre id="parse"></pre>
+  </div>
+  <div class="pane" data-pane="sema" data-stage="semantic" data-title="Semantic tree" data-tip="The Abstract Syntax Tree after semantic analysis">
+    <h2 title="printAST after semantic analysis: like -vcg-ast, but labels nodes by their internal DMD class name (e.g. AddExp, CompoundStatement) instead of regenerated D syntax">Semantic tree (printAST, post-semantic)</h2>
+    <pre id="sema"></pre>
+  </div>
+  <div class="pane" data-pane="ast" data-stage="semantic" data-title="Lowered AST" data-tip="The Abstract Syntax Tree after lowering, regenerated as D source (-vcg-ast)">
+    <h2>Lowered AST (-vcg-ast)</h2>
+    <pre id="ast"></pre>
+  </div>
+  <div class="pane" data-pane="ir" data-stage="codegen" data-title="IR (unoptimized)" data-tip="Backend Intermediate Representation before optimizations">
+    <h2 title="Backend intermediate representation: the block/elem graph of each function just after lowering, before the optimizer runs.">Backend IR — before -O (block/elem graph)</h2>
+    <pre id="ir"></pre>
+  </div>
+  <div class="pane" data-pane="iropt" data-stage="codegen" data-title="IR (optimized)" data-tip="Backend Intermediate Representation after optimizations">
+    <h2 title="The same block/elem graph after the -O global optimizer has run, immediately before code generation. Diff against the pre-opt pane to see what the optimizer did.">Backend IR — after -O (block/elem graph)</h2>
+    <pre id="iropt"></pre>
+  </div>
+  <div class="pane" data-pane="asmun" data-stage="codegen" data-title="Disassembly" data-tip="The generated x86-64 assembly, without the -O optimizer">
+    <h2 title="x86-64 disassembly generated without the -O global optimizer. Diff against the optimized pane to see what the optimizer did to the machine code.">x86-64 disassembly — before -O</h2>
+    <pre id="asmun"></pre>
+  </div>
+  <div class="pane" data-pane="asm" data-stage="codegen" data-title="Disassembly (-O)" data-tip="The generated x86-64 assembly, with the -O optimizer">
+    <h2 title="x86-64 disassembly generated with the -O global optimizer.">x86-64 disassembly — after -O</h2>
+    <pre id="asm"></pre>
+  </div>
+  <div class="pane" data-pane="wat" data-stage="codegen" data-title="WebAssembly" data-tip="The generated WebAssembly, in text format (WAT)">
+    <h2 title="WebAssembly text produced by dmd's own wasm backend for the same snippet, unoptimized. Only the snippet's functions; anything it calls in druntime stays an import.">WebAssembly text (WAT)</h2>
+    <pre id="wat"></pre>
+  </div>
+  <div class="pane" data-pane="run" data-stage="diag" data-title="Program output" data-tip="Standard output of the compiled program, run in this page" hidden>
+    <h2 title="dmd links the program into a complete WebAssembly module in the browser and runs it here; this is what it wrote to stdout/stderr.">Program output</h2>
+    <pre id="run"></pre>
+  </div>
+  <div class="pane" data-pane="diag" data-stage="diag" data-title="Diagnostics" data-tip="Compiler errors and other console output">
+    <h2>Diagnostics</h2>
+    <pre id="diag"></pre>
+  </div>
+</div>
+
+<script type="module">
+// dmd.wasm runs in a Web Worker (see worker.js) so the synchronous compile
+// can't freeze the page; this thread only sends source and renders results.
+import { EXAMPLES } from "./examples.js";   // shared with the tour's inline demos
+import { EditorView, keymap, lineNumbers, highlightActiveLineGutter, highlightSpecialChars,
+         drawSelection, dropCursor, rectangularSelection, crosshairCursor,
+         highlightActiveLine, Decoration } from "@codemirror/view";
+import { EditorState, StateField, StateEffect } from "@codemirror/state";
+import { StreamLanguage, StringStream, HighlightStyle, syntaxHighlighting, defaultHighlightStyle,
+         foldGutter, foldKeymap, indentOnInput, indentUnit, bracketMatching } from "@codemirror/language";
+import { history, historyKeymap, defaultKeymap, indentWithTab } from "@codemirror/commands";
+import { searchKeymap, highlightSelectionMatches } from "@codemirror/search";
+import { autocompletion, completionKeymap, closeBrackets, closeBracketsKeymap } from "@codemirror/autocomplete";
+import { lintKeymap, lintGutter, setDiagnostics } from "@codemirror/lint";
+import { tags as t } from "@lezer/highlight";
+
+// basicSetup, reconstructed from the individual packages (see import-map note in
+// <head> for why we don't pull it from the `codemirror` meta-package).
+const basicSetup = [
+    lineNumbers(), highlightActiveLineGutter(), highlightSpecialChars(),
+    history(), foldGutter(), drawSelection(), dropCursor(),
+    EditorState.allowMultipleSelections.of(true), indentOnInput(),
+    EditorState.tabSize.of(4), indentUnit.of("\t"),   // indent with real tabs, 4 columns wide
+    syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
+    bracketMatching(), closeBrackets(), autocompletion(),
+    rectangularSelection(), crosshairCursor(),
+    highlightActiveLine(), highlightSelectionMatches(),
+    keymap.of([
+        ...closeBracketsKeymap, ...defaultKeymap, ...searchKeymap,
+        ...historyKeymap, ...foldKeymap, ...completionKeymap, ...lintKeymap,
+    ]),
+];
+
+const $ = (id) => document.getElementById(id);
+const cols = $("cols");
+const LS_KEY = "dmdwasm.layout.v1";
+
+// Embedded subset mode (index.html?embed=1&panes=lex,parse&layout=cols&src=…),
+// used by the tour page to inline a focused slice of the explorer in an iframe:
+// the page chrome is hidden, only the requested panes (plus the source input)
+// are shown, and layout is fixed rather than persisted to localStorage.
+const params = new URLSearchParams(location.search);
+const EMBED = params.has("embed");
+if (EMBED) document.body.classList.add("embed");
+const PR = /^\d+$/.test(params.get("pr") || "") ? params.get("pr") : null;
+const TRYPR_URL = "https://github.com/dkorpel/dmd-explorer/actions/workflows/try-pr.yml";
+
+// ---- Pane show/hide + layout, persisted to localStorage ------------------
+
+function paneEls() { return [...cols.querySelectorAll(".pane")]; }
+
+function saveState() {
+    if (EMBED) return;   // embed layout is fixed by URL params, never persisted
+    const hidden = paneEls().filter((p) => p.hidden).map((p) => p.dataset.pane);
+    localStorage.setItem(LS_KEY, JSON.stringify({ hidden }));
+}
+
+// Pick the best layout for the current viewport + visible pane count: stack into
+// rows on a narrow/portrait screen (e.g. a phone held upright), spread into a
+// grid when many panes are open, otherwise side-by-side columns. Embedded demos
+// keep the fixed layout from their URL params, so this is a no-op there.
+function applyAutoLayout() {
+    if (EMBED) return;
+    const visible = paneEls().filter((p) => !p.hidden).length;
+    // Prefer columns as long as each pane keeps ~80 monospace chars: 80 * ~8px
+    // (13px ui-monospace) + 24px padding + scrollbar ≈ 660px. Only fall back to a
+    // grid (and finally stacked rows) once columns would get narrower than that.
+    const MIN_PANE_W = 600;
+    const availW = cols.clientWidth || window.innerWidth;
+    const fits = Math.max(1, Math.floor(availW / MIN_PANE_W));
+    applyLayout(fits >= visible ? "cols" : fits >= 2 ? "grid" : "rows", fits);
+}
+
+function applyLayout(layout, gridCols = 2) {
+    cols.classList.toggle("rows", layout === "rows");
+    cols.classList.toggle("grid", layout === "grid");
+    cols.style.gridTemplateColumns =
+        layout === "grid" ? `repeat(${gridCols}, 1fr)` : "";
+    for (const b of document.querySelectorAll("[data-layout]"))
+        b.setAttribute("aria-pressed", String(b.dataset.layout === layout));
+}
+
+function setHidden(pane, hidden) {
+    const el = cols.querySelector(`.pane[data-pane="${pane}"]`);
+    if (!el) return;
+    if (el.dataset.stage === "source") hidden = false;   // D source pane is always visible
+    el.hidden = hidden;
+    const chip = document.querySelector(`[data-toggle="${pane}"]`);
+    if (chip) chip.setAttribute("aria-pressed", String(!hidden));
+}
+
+function loadState() {
+    let s = {};
+    try { s = JSON.parse(localStorage.getItem(LS_KEY)) || {}; } catch {}
+    // Panes always render in the default DOM order; only visibility is persisted.
+    for (const p of (s.hidden || [])) setHidden(p, true);
+    applyAutoLayout();
+}
+
+// Embed mode: show only the panes named in ?panes= (plus the always-on source
+// input), in that order, with the layout fixed by ?layout=. No persistence.
+function applyEmbed() {
+    const want = (params.get("panes") || "").split(",").map((s) => s.trim()).filter(Boolean);
+    const keep = new Set(["src", ...want]);            // source input is always shown
+    for (const p of paneEls()) setHidden(p.dataset.pane, !keep.has(p.dataset.pane));
+    for (const pane of ["src", ...want]) {             // honor the requested order
+        const el = cols.querySelector(`.pane[data-pane="${pane}"]`);
+        if (el) cols.appendChild(el);
+    }
+    applyLayout(params.get("layout") || "cols");
+}
+
+// Build the pane toggles, grouped by compiler stage (source → parsing →
+// semantic → codegen → output). Each group gets a colored label.
+const STAGES = [
+    ["source",   "Source"],
+    ["parse",    "Parsing"],
+    ["semantic", "Semantic"],
+    ["codegen",  "Codegen"],
+    ["diag",     "Output"],
+];
+const toggles = $("paneToggles");
+// Anchor for shift-click range selection (browser-tab style): the last pane
+// solo'd or toggled, used as the other end of a shift-click range.
+let tabAnchor = null;
+const tabOrder = () => paneEls().filter((p) => p.dataset.stage !== "source").map((p) => p.dataset.pane);
+const makeChip = (p) => {
+    const chip = document.createElement("button");
+    chip.className = "tab";
+    chip.dataset.toggle = p.dataset.pane;
+    chip.textContent = p.dataset.title;
+    chip.title = (p.dataset.tip ? p.dataset.tip + "\n\n" : "") +
+                 "Click: show only this panel · Ctrl/⌘+click: toggle it · Shift+click: select range";
+    chip.setAttribute("aria-pressed", String(!p.hidden));
+    // Default click solos this output (hides every other non-source pane);
+    // Ctrl/⌘+click toggles just this pane (multi-select); Shift+click selects
+    // the contiguous range from the anchor to this pane.
+    chip.addEventListener("click", (e) => {
+        const pane = p.dataset.pane;
+        if (e.shiftKey && tabAnchor) {
+            const order = tabOrder();
+            let a = order.indexOf(tabAnchor), b = order.indexOf(pane);
+            if (a > b) [a, b] = [b, a];
+            const range = new Set(order.slice(a, b + 1));
+            for (const q of order) setHidden(q, !range.has(q));
+        } else if (e.ctrlKey || e.metaKey) {
+            setHidden(pane, !p.hidden);
+            tabAnchor = pane;
+        } else {
+            soloPane(pane);
+            tabAnchor = pane;
+        }
+        saveState();
+        applyAutoLayout();
+        fillWatIfShown();
+    });
+    return chip;
+};
+
+// The WAT pane costs an extra wasm-target compile pass, so it is only filled
+// when it is on screen; showing an empty one asks for a fresh compile.
+function watWanted() {
+    const el = cols.querySelector('.pane[data-pane="wat"]');
+    return !!el && !el.hidden;
+}
+let watFilled = false;
+function fillWatIfShown() {
+    if (watWanted() && !watFilled) run();
+}
+for (const [stage] of STAGES) {
+    if (stage === "source") continue;   // the editor is always visible — no toggle
+    for (const p of paneEls().filter((p) => p.dataset.stage === stage))
+        toggles.appendChild(makeChip(p));
+}
+
+// The strip has no visible scrollbar, so translate a plain vertical wheel over
+// it into horizontal scrolling, the way browser tab strips behave.
+toggles.addEventListener("wheel", (e) => {
+    if (e.deltaX || !e.deltaY) return;
+    if (toggles.scrollWidth <= toggles.clientWidth) return;
+    toggles.scrollLeft += e.deltaY;
+    e.preventDefault();
+}, { passive: false });
+
+function updateTabOverflow() {
+    const max = toggles.scrollWidth - toggles.clientWidth;
+    toggles.classList.toggle("can-left", toggles.scrollLeft > 1);
+    toggles.classList.toggle("can-right", toggles.scrollLeft < max - 1);
+}
+toggles.addEventListener("scroll", updateTabOverflow, { passive: true });
+window.addEventListener("resize", updateTabOverflow);
+updateTabOverflow();
+
+// "Solo" a pane: show only this output (plus the always-on D source input) by
+// hiding every other non-source pane. This is the default action of a pane's
+// top-bar toggle chip (Ctrl+click toggles a single pane instead).
+function soloPane(pane) {
+    for (const p of paneEls()) {
+        if (p.dataset.stage === "source") continue;
+        setHidden(p.dataset.pane, p.dataset.pane !== pane);
+    }
+}
+
+// Per-pane header "close" button: hide this pane (equivalent to Ctrl+clicking
+// its top-bar toggle off). The source pane is always visible, so it gets none.
+for (const p of paneEls()) {
+    if (p.dataset.stage === "source") continue;
+    const h2 = p.querySelector("h2");
+
+    const btn = document.createElement("button");
+    btn.className = "pane-close";
+    btn.type = "button";
+    btn.draggable = false;
+    btn.textContent = "✕";
+    btn.title = "Hide this panel";
+    btn.addEventListener("click", () => { setHidden(p.dataset.pane, true); saveState(); applyAutoLayout(); });
+    h2.appendChild(btn);
+}
+
+// Re-pick the automatic layout when the window is resized (e.g. a phone rotated
+// between portrait and landscape).
+let layoutTimer = null;
+window.addEventListener("resize", () => {
+    clearTimeout(layoutTimer);
+    layoutTimer = setTimeout(applyAutoLayout, 150);
+});
+
+if (EMBED) applyEmbed(); else loadState();
+document.documentElement.classList.remove("embed-boot");   // panes configured — reveal
+
+// ---- CodeMirror source editor (replaces the plain textarea) ---------------
+
+// A minimal D mode: enough to color keywords, types, literals and comments.
+// D has no official Lezer grammar, so this is a hand-written StreamLanguage
+// (the CM6 equivalent of a CodeMirror-5 mode) rather than the C/C++ grammar.
+const D_KEYWORDS = new Set(`abstract alias align asm assert auto body break case
+cast catch class const continue debug default delegate delete deprecated do else
+enum export extern false final finally for foreach foreach_reverse function goto
+if immutable import in inout interface invariant is lazy macro mixin module new
+nothrow null out override package pragma private protected public pure ref return
+scope shared static struct super switch synchronized template this throw true try
+typeid typeof union unittest version while with __gshared __traits __vector
+__parameters __FILE__ __LINE__ __MODULE__ __FUNCTION__ __PRETTY_FUNCTION__`.split(/\s+/));
+const D_TYPES = new Set(`bool byte ubyte short ushort int uint long ulong cent ucent
+float double real ifloat idouble ireal cfloat cdouble creal char wchar dchar void
+string wstring dstring size_t ptrdiff_t`.split(/\s+/));
+
+// Consume the body of a string/char literal opened with quote `state.q`.
+// Backtick (WYSIWYG) strings ignore backslash escapes; others honor them.
+function dStringBody(stream, state) {
+    let c;
+    while ((c = stream.next()) != null) {
+        if (c === "\\" && state.q !== "`") { stream.next(); continue; }
+        if (c === state.q) { state.q = null; break; }
+    }
+    return "string";
+}
+
+const dStreamParser = {
+    name: "d",
+    startState: () => ({ block: false, nest: 0, q: null }),
+    token(stream, state) {
+        // Continue a multi-line construct started on an earlier line.
+        if (state.block) {                               // /* ... */
+            while (!stream.eol()) { if (stream.match("*/")) { state.block = false; break; } stream.next(); }
+            return "comment";
+        }
+        if (state.nest > 0) {                            // /+ ... +/ (nesting)
+            while (!stream.eol()) {
+                if (stream.match("/+")) { state.nest++; continue; }
+                if (stream.match("+/")) { state.nest--; if (state.nest === 0) break; continue; }
+                stream.next();
+            }
+            return "comment";
+        }
+        if (state.q) return dStringBody(stream, state);  // multi-line string
+
+        if (stream.eatSpace()) return null;
+
+        if (stream.match("//")) { stream.skipToEnd(); return "comment"; }
+        if (stream.match("/*")) {
+            state.block = true;
+            while (!stream.eol()) { if (stream.match("*/")) { state.block = false; break; } stream.next(); }
+            return "comment";
+        }
+        if (stream.match("/+")) {
+            state.nest = 1;
+            while (!stream.eol()) {
+                if (stream.match("/+")) { state.nest++; continue; }
+                if (stream.match("+/")) { state.nest--; if (state.nest === 0) break; continue; }
+                stream.next();
+            }
+            return "comment";
+        }
+
+        const ch = stream.peek();
+        if (ch === '"' || ch === '`' || ch === "'") { stream.next(); state.q = ch; return dStringBody(stream, state); }
+        if (/[0-9]/.test(ch)) {
+            stream.match(/^(0[xX][0-9a-fA-F_]+|0[bB][01_]+|[0-9][0-9_]*\.?[0-9_]*([eE][+\-]?[0-9_]+)?)[fFlLuUiI]*/);
+            return "number";
+        }
+        if (ch === "@") { stream.next(); stream.eatWhile(/\w/); return "meta"; }   // @safe, @nogc, ...
+        if (/[A-Za-z_]/.test(ch)) {
+            stream.eatWhile(/\w/);
+            const w = stream.current();
+            if (D_KEYWORDS.has(w)) return "keyword";
+            if (D_TYPES.has(w)) return "type";
+            return "variable";
+        }
+        stream.next();                                   // punctuation / operators: no highlight
+        return null;
+    },
+};
+const dLanguage = StreamLanguage.define(dStreamParser);
+
+// Highlight palette mirroring dlang.org's D code colors (keyword/type blue,
+// string red, comment gray). Values are aero.css tokens (var(...)), so the
+// editor re-themes live with the rest of the page when the theme is toggled.
+const dHighlight = HighlightStyle.define([
+    { tag: t.keyword,                      color: "var(--code-kw)" },
+    { tag: t.typeName,                     color: "var(--code-type)" },
+    { tag: t.comment,                      color: "var(--code-comment)", fontStyle: "italic" },
+    { tag: t.string,                       color: "var(--code-string)" },
+    { tag: t.number,                       color: "var(--code-number)" },
+    { tag: t.meta,                         color: "var(--code-meta)" },
+    { tag: t.variableName,                 color: "var(--code-fg)" },
+]);
+
+const dTheme = EditorView.theme({
+    "&":                       { color: "var(--code-fg)", background: "var(--aero-surface)", height: "100%", fontSize: "13px" },
+    ".cm-content":             { fontFamily: "ui-monospace, monospace", caretColor: "var(--code-fg)" },
+    ".cm-line":                { transition: "background-color 80ms ease-out" },
+    ".cm-gutters":             { backgroundColor: "var(--code-gutter)", color: "var(--aero-muted)", border: "none" },
+    ".cm-activeLine":          { backgroundColor: "rgba(64,64,220,.06)" },
+    ".cm-activeLineGutter":    { backgroundColor: "rgba(64,64,220,.06)", color: "var(--aero-text-2)" },
+    ".cm-syncHighlight":       { backgroundColor: "rgba(64, 64, 220, 0.12)", transition: "background-color 80ms ease-out" },
+    "&.cm-focused":            { outline: "none" },
+    ".cm-cursor":              { borderLeftColor: "var(--code-fg)" },
+    "&.cm-focused .cm-selectionBackground, ::selection": { backgroundColor: "var(--code-sel)" },
+    // Inline lint (diagnostics) — themed tooltip + dlang.org error/warning colors.
+    ".cm-tooltip-lint":              { background: "var(--aero-panel)", border: "1px solid var(--aero-edge)", color: "var(--aero-text)" },
+    ".cm-diagnostic":                { padding: "3px 8px", borderLeft: "3px solid #888" },
+    ".cm-diagnostic-error":          { borderLeftColor: "#b03931" },
+    ".cm-diagnostic-warning":        { borderLeftColor: "#c87f1e" },
+    ".cm-lintRange-error":           { backgroundImage: "none", textDecoration: "underline wavy #b03931" },
+    ".cm-lintRange-warning":         { backgroundImage: "none", textDecoration: "underline wavy #c87f1e" },
+});
+
+// Synced-line highlight in the editor: a StateField holding a single line
+// decoration, driven by `setHlLine` effects from the cross-pane sync below.
+const setHlLine = StateEffect.define();
+const hlLineDeco = Decoration.line({ class: "cm-syncHighlight" });
+const hlField = StateField.define({
+    create: () => Decoration.none,
+    update(deco, tr) {
+        deco = deco.map(tr.changes);
+        for (const e of tr.effects) if (e.is(setHlLine)) {
+            const ln = e.value;
+            deco = (ln == null || ln < 1 || ln > tr.state.doc.lines)
+                ? Decoration.none
+                : Decoration.set([hlLineDeco.range(tr.state.doc.line(ln).from)]);
+        }
+        return deco;
+    },
+    provide: (f) => EditorView.decorations.from(f),
+});
+
+// Inline diagnostics are pushed imperatively from run() via setDiagnostics (see
+// below) — not through a linter() source, whose auto-scheduled runs would read a
+// stale diagnostic set (compile is debounced) and lag the markers by one compile.
+
+// `onDocChange` is wired up once the wasm compiler is ready (see below).
+let runTimer = null;
+let onDocChange = () => {};
+let onCursor = () => {};
+const editor = new EditorView({
+    doc: params.has("z") ? "" : (params.get("src") ?? EXAMPLES[0].code),   // ?src= seeds embedded demos, ?z= is decoded later
+    parent: $("src"),
+    extensions: [
+        basicSetup,                                      // line numbers, undo/redo, bracket match, ...
+        keymap.of([indentWithTab]),                      // Tab inserts indentation
+        dLanguage,
+        syntaxHighlighting(dHighlight),
+        dTheme,
+        hlField,
+        lintGutter(),                                    // inline error/warning markers (gutter + lint field)
+        EditorView.updateListener.of((u) => {
+            if (u.docChanged) onDocChange();
+            if (u.selectionSet || u.docChanged) onCursor();
+        }),
+    ],
+});
+const getSrc = () => editor.state.doc.toString();
+
+// ---- Example snippets dropdown --------------------------------------------
+// Populated from the shared catalog (examples.js) that the tour's inline demos
+// also draw from, so the two never drift apart.
+const exSel = $("examples");
+let examples = EXAMPLES;
+function setExamples(list, placeholder) {
+    examples = list;
+    exSel.textContent = "";
+    const ph = document.createElement("option");
+    ph.value = ""; ph.selected = true; ph.disabled = true; ph.hidden = true;
+    ph.textContent = placeholder;
+    exSel.appendChild(ph);
+    list.forEach((ex, i) => {
+        const o = document.createElement("option");
+        o.value = String(i);
+        o.textContent = ex.label;
+        exSel.appendChild(o);
+    });
+}
+async function exampleCode(ex) {
+    if (ex.code != null) return ex.code;
+    const r = await fetch(ex.file, { cache: "no-cache" });
+    if (!r.ok) throw new Error(`${ex.file}: HTTP ${r.status}`);
+    return r.text();
+}
+if (exSel) {
+    setExamples(EXAMPLES, "Load an example…");
+    exSel.addEventListener("change", async () => {
+        const ex = examples[+exSel.value];
+        if (!ex) return;
+        let code;
+        try { code = await exampleCode(ex); }
+        catch (e) { $("status").textContent = "example failed to load: " + e.message; return; }
+        editor.dispatch({ changes: { from: 0, to: editor.state.doc.length, insert: code } });
+        // Match the tour's pane configuration: show the example's declared panes
+        // (plus the always-on source input), hide the rest.
+        const want = new Set((ex.panes || "").split(",").map((s) => s.trim()).filter(Boolean));
+        if (want.size) {
+            for (const p of paneEls()) setHidden(p.dataset.pane, !want.has(p.dataset.pane));
+            saveState();
+            applyAutoLayout();
+        }
+        editor.focus();
+    });
+}
+
+const prDlg = $("prDialog");
+if (prDlg) {
+    $("prBuildLink").href = TRYPR_URL;
+    $("prBtn").addEventListener("click", () => prDlg.showModal());
+    prDlg.addEventListener("click", (e) => { if (e.target === prDlg) prDlg.close(); });
+    const openPr = () => {
+        const n = $("prNum").value.trim();
+        if (/^\d+$/.test(n)) location.search = "?pr=" + n;
+    };
+    $("prOpen").addEventListener("click", openPr);
+    $("prNum").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); openPr(); } });
+    $("prMain").hidden = !PR;
+    $("prMain").addEventListener("click", () => { location.search = ""; });
+    fetch("pr/index.json", { cache: "no-cache" })
+        .then((r) => (r.ok ? r.json() : []))
+        .then((list) => {
+            if (!Array.isArray(list) || !list.length) return;
+            const ul = $("prList");
+            ul.textContent = "";
+            for (const m of list) {
+                const li = document.createElement("li");
+                const a = document.createElement("a");
+                a.href = "?pr=" + m.pr;
+                a.textContent = `#${m.pr} ${m.title}`;
+                li.appendChild(a);
+                li.appendChild(document.createTextNode(` by ${m.author}, built ${String(m.builtAt || "").slice(0, 10)}`));
+                ul.appendChild(li);
+            }
+        })
+        .catch(() => {});
+}
+
+async function prBuildMeta(n) {
+    try {
+        const r = await fetch(`pr/${n}/meta.json`, { cache: "no-cache" });
+        return r.ok ? await r.json() : null;
+    } catch (e) {
+        return null;
+    }
+}
+
+const b64url = {
+    enc: (bytes) => btoa(String.fromCharCode(...bytes)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, ""),
+    dec: (s) => Uint8Array.from(atob(s.replace(/-/g, "+").replace(/_/g, "/")), (c) => c.charCodeAt(0)),
+};
+async function encodeSnippet(text) {
+    const raw = new TextEncoder().encode(text);
+    if (typeof CompressionStream !== "function") return null;
+    const zs = new Blob([raw]).stream().pipeThrough(new CompressionStream("deflate-raw"));
+    return b64url.enc(new Uint8Array(await new Response(zs).arrayBuffer()));
+}
+async function decodeSnippet(z) {
+    try {
+        const ds = new Blob([b64url.dec(z)]).stream().pipeThrough(new DecompressionStream("deflate-raw"));
+        return await new Response(ds).text();
+    } catch (e) {
+        return null;
+    }
+}
+async function shareLink() {
+    const q = new URLSearchParams();
+    if (PR) q.set("pr", PR);
+    const z = await encodeSnippet(getSrc());
+    if (z) q.set("z", z); else q.set("src", getSrc());
+    return location.origin + location.pathname + "?" + q.toString();
+}
+if ($("shareBtn")) {
+    $("shareBtn").addEventListener("click", async () => {
+        const url = await shareLink();
+        window.history.replaceState(null, "", url);
+        try {
+            await navigator.clipboard.writeText(url);
+            $("status").textContent = `link copied (${url.length} chars)`;
+        } catch (e) {
+            $("status").textContent = "link is in the address bar";
+        }
+    });
+}
+
+// In an embedded demo, offer a one-click jump to the full explorer carrying the
+// reader's current edits (href is refreshed at click time so it stays current).
+if (EMBED) {
+    const open = document.createElement("a");
+    open.className = "embed-open";
+    open.target = "_top";          // break out of the tour's iframe into the full window
+    open.rel = "noopener";
+    open.textContent = "↗ open in explorer";
+    open.title = "Open this snippet in the full DMD explorer";
+    open.addEventListener("mousedown", () => { open.href = "index.html?src=" + encodeURIComponent(getSrc()); });
+    document.body.appendChild(open);
+}
+
+// ---- ANSI rendering -------------------------------------------------------
+
+const ESC = (s) => s.replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
+
+// Strip ANSI SGR escapes — the inline editor markers are plain text (color is
+// reserved for the diagnostics pane, rendered via ansiToHtml).
+const stripAnsi = (s) => s.replace(/\x1b\[[0-9;]*m/g, "");
+
+// Read-only D syntax highlight for the lowered-AST pane. Reuses the editor's
+// StreamLanguage tokenizer (dStreamParser) directly over a StringStream, emitting
+// colored <span>s into a <pre> — highlighted like source, but with no cursor,
+// gutter or editing, so it stays clearly an output rather than an input field.
+function highlightD(text) {
+    const state = dStreamParser.startState();
+    const out = [];
+    for (const raw of text.split("\n")) {
+        if (raw === "") { out.push(""); continue; }
+        const stream = new StringStream(raw, 4, 4);
+        let line = "";
+        while (!stream.eol()) {
+            stream.start = stream.pos;
+            const tag = dStreamParser.token(stream, state);
+            if (stream.pos <= stream.start) stream.pos = stream.start + 1;   // guarantee progress
+            const chunk = ESC(raw.slice(stream.start, stream.pos));
+            line += tag ? `<span class="tok-${tag}">${chunk}</span>` : chunk;
+        }
+        out.push(line);
+    }
+    return out.join("\n");
+}
+
+// Parse DMD's stderr diagnostics into CodeMirror lint diagnostics positioned in
+// the source. DMD prints `input.d(line,col): Error: message` (also Warning and
+// Deprecation); supplemental/continuation lines without a location are skipped.
+const DIAG_RE = /^(.+?)\((\d+)(?:,(\d+))?\):\s+(Error|Warning|Deprecation):\s+(.*)$/;
+const DIAG_SEV = { Error: "error", Warning: "warning", Deprecation: "warning" };
+function parseDiagnostics(text, doc) {
+    const out = [];
+    for (const raw of stripAnsi(text || "").split("\n")) {
+        const m = raw.match(DIAG_RE);
+        if (!m || m[1] !== "input.d") continue;
+        const line = doc.line(Math.min(+m[2], doc.lines));
+        const col = m[3] ? +m[3] : 0;
+        let from = line.from, to = line.to;
+        if (col > 0) {
+            from = Math.min(line.from + col - 1, line.to);
+            // Underline the identifier/token at the column; else to line's end.
+            const w = doc.sliceString(from, line.to).match(/^[A-Za-z_]\w*|^\S/);
+            to = w ? from + w[0].length : line.to;
+        }
+        out.push({ from, to, severity: DIAG_SEV[m[4]] || "error", message: m[5] });
+    }
+    return out;
+}
+
+// Render text containing ANSI SGR escape codes (\x1b[...m) as colored HTML.
+// DMD's ANSIConsole emits: \x1b[1m (bold), \x1b[<0|1>;3Nm (fg color), \x1b[m (reset).
+function ansiToHtml(text) {
+    let html = "", bold = false, fg = null;
+    const open = () => {
+        const cls = [bold && "ansi-1", fg !== null && `ansi-fg-${fg}`].filter(Boolean);
+        return cls.length ? `<span class="${cls.join(" ")}">` : "";
+    };
+    let span = false;
+    const flush = (chunk) => {
+        if (!chunk) return;
+        const wrap = open();
+        html += wrap ? wrap + ESC(chunk) + "</span>" : ESC(chunk);
+    };
+    const re = /\x1b\[([0-9;]*)m/g;
+    let last = 0, m;
+    while ((m = re.exec(text)) !== null) {
+        flush(text.slice(last, m.index));
+        last = re.lastIndex;
+        for (const code of (m[1] === "" ? ["0"] : m[1].split(";"))) {
+            const n = parseInt(code, 10);
+            if (n === 0) { bold = false; fg = null; }
+            else if (n === 1) bold = true;
+            else if (n === 22) bold = false;
+            else if (n >= 30 && n <= 37) fg = n - 30;
+            else if (n === 39) fg = null;
+        }
+    }
+    flush(text.slice(last));
+    return html;
+}
+
+// ---- Cross-pane source-line synchronization -------------------------------
+
+// Render `text` into the pane `id` as one `<span class="ln">` per line, tagging
+// each with the source line it maps to (data-line) so hovering syncs highlights.
+//
+// Source line comes from a trailing SOH marker (\x01<N>) emitted by the dumpers:
+//   N >= 1  -> this line maps to source line N (and becomes the carry value)
+//   N == 0  -> explicit "no source line" (clears the carry)
+//   no mark -> inherit the previous line's source line (carry-forward; used for
+//              an AST node's detail lines and IR child elems without their own pos)
+// Panes with no markers at all (e.g. the lexer dump) map positionally when
+// `positional` is set: rendered line i corresponds to source line i+1.
+const LINE_MARK = /\x01(\d+)$/;
+function renderLined(id, text, positional = false, emptyMsg = "(no output)") {
+    const pre = $(id);
+    pre.textContent = "";
+    if (!text) { pre.textContent = emptyMsg; return; }
+    const lines = text.split("\n");
+    const frag = document.createDocumentFragment();
+    let carry = null;
+    for (let i = 0; i < lines.length; i++) {
+        let line = lines[i];
+        let srcLine;
+        const m = line.match(LINE_MARK);
+        if (m) {
+            line = line.slice(0, m.index);
+            srcLine = +m[1] || null;        // 0 -> null
+            carry = srcLine;
+        } else {
+            srcLine = positional ? i + 1 : carry;
+        }
+        const span = document.createElement("span");
+        span.className = "ln";
+        if (srcLine) span.dataset.line = srcLine;
+        span.textContent = line;
+        frag.appendChild(span);
+    }
+    pre.appendChild(frag);
+}
+
+// The -vasm disassembly carries "; line N" marker lines (emitted only by this
+// wasm build, not native dmd). Fold them into the same SOH carry format
+// renderLined consumes: stamp \x01N on the instruction that follows a marker
+// (later instructions carry it forward), clear the carry at each function header
+// (a line ending in ':'), and drop the marker lines so the pane shows clean asm.
+function asmWithLineMarks(asm) {
+    const out = [];
+    let pending = null;                       // source line to stamp on the next emitted line
+    for (const line of asm.split("\n")) {
+        const m = line.match(/^; line (\d+)$/);
+        if (m) { pending = +m[1]; continue; }              // marker: drop, remember its line
+        if (line.endsWith(":")) { out.push(line + "\x010"); pending = null; continue; }  // function header: reset carry
+        if (pending != null) { out.push(line + "\x01" + pending); pending = null; }
+        else out.push(line);
+    }
+    return out.join("\n");
+}
+
+// Effective highlighted source line: a hovered line (editor or output) wins over
+// the editor's cursor line, so moving the mouse away falls back to the caret.
+let hoverLine = null, cursorLine = 1, lastApplied, lastEditorHl;
+const effLine = () => hoverLine ?? cursorLine;
+
+function editorSetHl(line) {
+    if (line === lastEditorHl) return;
+    lastEditorHl = line;
+    editor.dispatch({ effects: setHlLine.of(line ?? null) });
+}
+
+function applyHighlight(force) {
+    const line = effLine();
+    if (!force && line === lastApplied) return;
+    lastApplied = line;
+    for (const el of cols.querySelectorAll(".ln.hl")) el.classList.remove("hl");
+    if (line != null)
+        for (const el of cols.querySelectorAll(`.ln[data-line="${line}"]`)) el.classList.add("hl");
+    editorSetHl(line);
+}
+
+onCursor = () => { cursorLine = editor.state.doc.lineAt(editor.state.selection.main.head).number; applyHighlight(); };
+
+// One delegated handler covers every pane (the editor host is inside #cols too):
+// hovering an output line or a source line drives the shared highlight.
+cols.addEventListener("mousemove", (e) => {
+    const ln = e.target.closest(".ln[data-line]");
+    if (ln) { hoverLine = +ln.dataset.line; applyHighlight(); return; }
+    const cmLine = e.target.closest(".cm-line");
+    if (cmLine) { hoverLine = editor.state.doc.lineAt(editor.posAtDOM(cmLine)).number; applyHighlight(); return; }
+    if (hoverLine !== null) { hoverLine = null; applyHighlight(); }
+});
+cols.addEventListener("mouseleave", () => { hoverLine = null; applyHighlight(); });
+
+// ---- Compile + render -----------------------------------------------------
+
+// Render one result object produced by the worker's compile(). Pure DOM work.
+function render({ lex, parse, sema, ast, ir, irOpt, asm, asmUnopt, wat, errors, diagnostics }) {
+    renderLined("lex", lex, /*positional*/ true);
+    renderLined("parse", parse);
+    renderLined("sema", sema);
+    if (ast) $("ast").innerHTML = highlightD(ast); else $("ast").textContent = "(no output)";
+    renderLined("ir", ir, false, "(no code generated)");
+    renderLined("iropt", irOpt, false, "(no code generated)");
+    renderLined("asmun", asmWithLineMarks(asmUnopt || ""), false, "(no code generated)");
+    renderLined("asm", asmWithLineMarks(asm), false, "(no code generated)");
+    watFilled = !!wat;
+    renderLined("wat", asmWithLineMarks(wat || ""), false, "(no code generated)");
+    $("diag").innerHTML = diagnostics ? ansiToHtml(diagnostics) : "(no errors/deprecations or other output)";
+    // Mirror the diagnostics inline in the editor (gutter + underline + tooltip).
+    editor.dispatch(setDiagnostics(editor.state, parseDiagnostics(diagnostics, editor.state.doc)));
+    applyHighlight(/*force*/ true);   // DOM was rebuilt; re-apply current highlight
+}
+
+// The compile happens in a Web Worker (worker.js), so the page never blocks and
+// the spinner animates for real. While a compile is in flight, further run()
+// calls just flag pendingRun; when the worker finishes we re-kick it with the
+// latest source, coalescing a burst of edits into a single trailing compile. The
+// spinner stays up from the first request until the worker goes idle.
+let worker = null;
+let lastRunMs = 0;
+let compileT0 = 0;
+let workerBusy = false;
+let pendingRun = false;
+let dmdLM = null;            // dmd.wasm Last-Modified, as a Date (or null)
+let loadResolve = null, loadReject = null;
+// A running program is arbitrary user code and can loop forever; the worker is
+// killed and replaced if it doesn't report back in time (see execProgram).
+let execWatchdog = 0;
+const EXEC_TIMEOUT_MS = 60000;
+
+function makeWorker() {
+    const w = new Worker("./worker.js", { type: "module" });
+    w.onmessage = (e) => {
+        const msg = e.data;
+        switch (msg.type) {
+            case "loaded":
+                if (msg.lastModified) { const d = new Date(msg.lastModified); if (!isNaN(d)) dmdLM = d; }
+                loadResolve && loadResolve();
+                break;
+            case "loadError":
+                loadReject && loadReject(new Error(msg.message));
+                break;
+            case "result":
+                lastRunMs = performance.now() - compileT0;
+                render(msg.result);
+                $("status").textContent = `${lastRunMs.toFixed(1)} ms`;
+                workerBusy = false;
+                if (pendingRun) startCompile();           // newer edits arrived mid-compile
+                else $("spinner").hidden = true;
+                break;
+            case "warmed":
+                break;
+            case "runPhase":
+                $("status").textContent = msg.phase + "…";
+                break;
+            case "runResult":
+                clearTimeout(execWatchdog);
+                workerBusy = false;
+                $("spinner").hidden = true;
+                renderRun(msg.result, performance.now() - compileT0);
+                break;
+        }
+    };
+    w.onerror = (e) => { $("status").textContent = "worker error: " + e.message; console.error(e); };
+    return w;
+}
+worker = makeWorker();
+
+function startCompile() {
+    workerBusy = true;
+    pendingRun = false;
+    compileT0 = performance.now();
+    worker.postMessage({ type: "compile", src: getSrc(), wat: watWanted() });
+}
+
+function run() {
+    $("spinner").hidden = false;
+    $("status").textContent = "compiling…";
+    if (workerBusy) { pendingRun = true; return; }   // coalesce until current compile returns
+    startCompile();
+}
+
+// Compile the program to a complete wasm module and run it, streaming whatever
+// it writes to stdout/stderr into the program-output pane.
+function execProgram() {
+    if (workerBusy) return;
+    setHidden("run", false);
+    applyAutoLayout();
+    saveState();
+    workerBusy = true;
+    compileT0 = performance.now();
+    $("spinner").hidden = false;
+    $("run").textContent = "";
+    worker.postMessage({ type: "run", src: getSrc() });
+    // The program may never return (or may trap the instance beyond recovery):
+    // replace the worker wholesale rather than leaving the page stuck.
+    execWatchdog = setTimeout(() => {
+        worker.terminate();
+        worker = makeWorker();
+        workerBusy = false;
+        $("spinner").hidden = true;
+        $("status").textContent = "run timed out";
+        $("run").textContent = "(program did not finish within " + (EXEC_TIMEOUT_MS / 1000) + " s — stopped)";
+        loadDmdWorker("dmd.wasm").then(warmWorker).catch(() => {});
+    }, EXEC_TIMEOUT_MS);
+}
+
+function renderRun({ output, errors, exitCode, diagnostics }, ms) {
+    const parts = [];
+    if (output) parts.push(output);
+    if (errors) parts.push(diagnostics ? diagnostics.trimEnd() : "(compilation failed — see diagnostics)");
+    else if (exitCode) parts.push("(exited with status " + exitCode + ")");
+    $("run").innerHTML = ansiToHtml(parts.join("\n") || "(no output)");
+    if (diagnostics)
+        $("diag").innerHTML = ansiToHtml(diagnostics);
+    $("status").textContent = `${ms.toFixed(1)} ms`;
+}
+
+// Queued behind the first compile: the runtime half of a Run is the same for
+// every program, so it is compiled once while the user is still reading.
+function warmWorker() {
+    worker.postMessage({ type: "warm" });
+}
+
+function loadDmdWorker(url) {
+    return new Promise((resolve, reject) => {
+        loadResolve = resolve; loadReject = reject;
+        worker.postMessage({ type: "load", url });
+    });
+}
+
+(async () => {
+    try {
+        let wasmUrl = "dmd.wasm", prMeta = null;
+        if (PR) {
+            $("prBtn").textContent = `PR #${PR}`;
+            $("prNum").value = PR;
+            prMeta = await prBuildMeta(PR);
+            if (!prMeta) {
+                $("status").textContent = `no build for PR #${PR} yet`;
+                prDlg.showModal();
+                return;
+            }
+            wasmUrl = `pr/${PR}/dmd.wasm`;
+            $("prBtn").setAttribute("aria-pressed", "true");
+            const a = $("prlink");
+            a.href = prMeta.url;
+            a.textContent = `#${prMeta.pr} ${prMeta.title}`;
+            a.title = `by ${prMeta.author}, commit ${String(prMeta.head).slice(0, 10)} applied on the explorer's ${prMeta.baseRef} snapshot`;
+            a.hidden = false;
+            fetch(`pr/${PR}/examples.json`, { cache: "no-cache" })
+                .then((r) => (r.ok ? r.json() : []))
+                .then((list) => {
+                    if (!Array.isArray(list) || !list.length) return;
+                    for (const ex of list) ex.file = `pr/${PR}/${ex.file}`;
+                    setExamples(list, `Tests from PR #${PR}…`);
+                })
+                .catch(() => {});
+        }
+        if (params.has("z")) {
+            const text = await decodeSnippet(params.get("z"));
+            if (text != null) editor.dispatch({ changes: { from: 0, to: editor.state.doc.length, insert: text } });
+            else $("status").textContent = "could not decode the snippet in the URL";
+        }
+        await loadDmdWorker(wasmUrl);
+        $("status").textContent = "ready";
+        if (prMeta) $("updated").textContent = "built " + String(prMeta.builtAt).slice(0, 10);
+        else if (dmdLM) $("updated").textContent = "updated " + dmdLM.toISOString().slice(0, 10);
+        // Ctrl+Enter (or ⌘+Enter on macOS) forces an immediate recompile.
+        document.addEventListener("keydown", (e) => {
+            if ((e.ctrlKey || e.metaKey) && e.key === "Enter") { e.preventDefault(); runNow(); }
+            if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === "Enter") { e.preventDefault(); execProgram(); }
+        });
+        $("runBtn").addEventListener("click", execProgram);
+        // Auto-recompile shortly after the user stops typing (or pastes). The
+        // 500 ms debounce keeps fast keystrokes from thrashing the compiler.
+        const runNow = () => { clearTimeout(runTimer); run(); };
+        onDocChange = () => { clearTimeout(runTimer); runTimer = setTimeout(run, 500); };
+        run();
+        warmWorker();
+    } catch (e) {
+        $("status").textContent = "load failed: " + e.message;
+        console.error(e);
+    }
+})();
+</script>
+</body>
+</html>
