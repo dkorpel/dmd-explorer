@@ -1,0 +1,368 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<link rel="icon" type="image/png" href="icon.png" />
+<link rel="stylesheet" href="aero.css" />
+<!-- Set <html data-theme> before paint (OS default + saved choice); wires #themeToggle. -->
+<script src="theme.js"></script>
+<title>A look inside DMD</title>
+<style>
+  /* Frutiger Aero look — shared tokens/base live in aero.css; this block is the
+     tour-page-specific layout on top. */
+  * { box-sizing: border-box; }
+  body { font: 16px/1.6 system-ui, sans-serif; margin: 0; }
+  a { color: #4040dc; }
+  a:hover { color: #2a2aa0; }
+  header { padding: 28px 24px; position: relative; }
+  header .wrap { max-width: 820px; margin: 0 auto; }
+  header .theme-toggle { position: absolute; top: 22px; right: 24px; }
+  header h1 { margin: 0; font-size: 28px; display: flex; align-items: center; gap: 12px; }
+  header h1 img { width: 30px; height: 30px; flex: none; image-rendering: -webkit-optimize-contrast; }
+  header .back { font-size: 13px; color: #f2dedb; }
+  header .back:hover { color: #fff; }
+  main { max-width: 820px; margin: 0 auto; padding: 8px 24px 80px; }
+  main > p { color: var(--aero-text); }
+
+  /* Inline code in prose. */
+  p code, li code, h3 code, h4 code { font: 13px ui-monospace, monospace;
+        background: var(--code-inline-bg); color: var(--code-inline-fg);
+        padding: 1px 5px; border-radius: 3px; }
+
+  /* The pipeline ribbon at the top — glossy glass pills. */
+  .pipe { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 26px 0 8px; }
+  .pipe .step { padding: 6px 12px; border-radius: 20px; font-size: 13px; font-weight: 600;
+                color: var(--aero-text); text-decoration: none;
+                background: var(--aero-glass);
+                border: 1px solid var(--aero-edge);
+                box-shadow: var(--aero-gloss), 0 1px 2px rgba(0,0,0,.15); }
+  .pipe .step:hover { border-color: var(--aero-edge-hi);
+                box-shadow: var(--aero-gloss), var(--aero-glow); }
+  .pipe .arrow { color: var(--aero-muted); }
+  .pipe .step.src     { border-color: var(--src); }
+  .pipe .step.parse   { border-color: var(--parse); }
+  .pipe .step.sema    { border-color: var(--sema); }
+  .pipe .step.codegen { border-color: var(--codegen); }
+
+  section { margin: 44px 0; }
+  section h2 { font-size: 22px; margin: 0 0 4px; display: flex; align-items: center; gap: 10px;
+               color: var(--aero-text-hi); }
+  section h2 .dot { width: 12px; height: 12px; border-radius: 50%; flex: none;
+                    box-shadow: inset 0 1px 0 rgba(255,255,255,.4); }
+  .parse   h2 .dot { background: var(--parse); }
+  .sema    h2 .dot { background: var(--sema); }
+  .codegen h2 .dot { background: var(--codegen); }
+
+  /* A sub-stage within a section. */
+  /* A sub-stage within a section. No left rule: wide demos are centered on the
+     viewport and bleed past the prose column, so a rule there would be crossed. */
+  .sub { margin: 28px 0; }
+  .sub h3 { font-size: 18px; margin: 0 0 8px; color: var(--aero-text-hi); }
+  .sub h4 { font-size: 16px; margin: 22px 0 8px; color: var(--aero-text-hi); }
+  .sub > p, .sub > ul { color: var(--aero-text); }
+
+  /* A static (non-interactive) code snippet. */
+  pre.codeblock { background: var(--aero-surface); border: 1px solid var(--aero-line);
+        border-radius: 8px; padding: 12px 14px; overflow-x: auto;
+        font: 13px/1.5 ui-monospace, monospace; color: var(--code-inline-fg);
+        box-shadow: var(--aero-gloss); }
+  pre.codeblock code { background: none; padding: 0; }
+
+  /* Inline interactive demo: an iframe of the explorer in embed mode, showing a
+     focused subset of panes for this stage. Lazy-loaded so each (large) wasm
+     instance only spins up when the reader scrolls it into view. A demo with
+     more than one snippet gets a dropdown that swaps the embedded source. */
+  .demo { margin: 14px 0 18px; border: 1px solid var(--aero-line); border-radius: 8px;
+          overflow: hidden; background: var(--aero-surface);
+          box-shadow: var(--aero-gloss), 0 2px 10px rgba(0,0,0,.18);
+          /* Center the demo on the viewport and let it bleed symmetrically past the
+             prose column so side-by-side panes get width without an inner scrollbar.
+             left:50% + translateX(-50%) is relative to the centered <main>, whose
+             center coincides with the viewport center; width is capped at 1180px and
+             otherwise fills to ~16px from each viewport edge. */
+          position: relative; left: 50%; transform: translateX(-50%);
+          width: min(1180px, calc(100vw - 32px)); }
+  .demo iframe { display: block; width: 100%; border: 0; }
+  .demo .demo-select { display: block; margin: 10px 10px 4px; font: inherit; font-size: 13px;
+          padding: 4px 8px; border-radius: 6px; cursor: pointer;
+          border: 1px solid var(--aero-edge); background: var(--aero-glass); color: var(--aero-text);
+          box-shadow: var(--aero-gloss); }
+
+  /* Data-structure cards — links into the actual dmd source for each construct
+     the prose names. */
+  .cards { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin: 18px 0 6px; }
+  @media (max-width: 680px) { .cards { grid-template-columns: 1fr; } }
+  .card { border: 1px solid var(--aero-line); border-left: 3px solid var(--aero-edge);
+          border-radius: 8px; padding: 12px 14px;
+          background: var(--aero-panel);
+          box-shadow: var(--aero-gloss), 0 2px 8px rgba(0,0,0,.12); }
+  .parse   .card { border-left-color: var(--parse); }
+  .sema    .card { border-left-color: var(--sema); }
+  .codegen .card { border-left-color: var(--codegen); }
+  .card h4 { margin: 0 0 4px; font-size: 15px; font-weight: 600; color: var(--aero-text-hi); }
+  .card h4 code { font: 13px ui-monospace, monospace;
+                  background: var(--code-inline-bg); padding: 1px 5px;
+                  border-radius: 3px; color: var(--code-inline-fg); }
+  .card p { margin: 6px 0 8px; font-size: 14px; color: var(--aero-text-2); }
+  .card .links { font-size: 12.5px; }
+  .card .links a { margin-right: 12px; white-space: nowrap; }
+  .card .links a::before { content: "‹›"; color: var(--aero-muted); margin-right: 4px; letter-spacing: -2px; }
+
+  /* Work-in-progress notice at the top of the tour. */
+  .wip { margin: 18px 0 0; padding: 10px 14px; font-size: 14px;
+         color: var(--aero-text-2); background: var(--aero-panel);
+         border: 1px solid var(--aero-line); border-left: 3px solid var(--codegen);
+         border-radius: 8px; box-shadow: var(--aero-gloss); }
+
+  footer { color: var(--aero-muted); font-size: 13px; border-top: 1px solid var(--aero-line);
+           padding-top: 18px; margin-top: 50px; }
+</style>
+</head>
+<body>
+<header>
+  <button id="themeToggle" class="theme-toggle" type="button" title="Toggle light/dark theme">☾</button>
+  <div class="wrap">
+    <a class="back" href="index.html">← back to the explorer</a>
+    <h1><img src="icon.png" alt="" /> A look inside DMD</h1>
+  </div>
+</header>
+<main>
+
+  <p class="wip">WIP: This tour is still being written and not finished yet!</p>
+
+  <p>Hey, my name is Dennis Korpel. I've created this website with help of an AI agent, but the text is
+     written by me in a plain text editor by me.</p>
+
+  <p>Since 2022 I'm Pull Request and Issue Manager for the D Language Foundation.
+     This website is meant to help understand the D compiler implementation
+     <a href="https://github.com/dlang/dmd" target="_blank" rel="noopener">dmd</a>', for contributors both
+     old and new.
+     While most D programmers are familiar with D source code, to work on the compiler one must also be
+     aware of the compiler's internal representation of D code at various stages.
+     While many names are obvious (<code>IfStatement</code>, <code>StructDeclaration</code>), you'll also
+     find there's plenty of unintuitive things.
+     For example, an integer literal like <code>100</code> constructs a <code>new IntegerExp(100)</code>
+     internally.
+     But what about a boolean literal <code>true</code>, does that create a <code>new BoolExp(true)</code>?
+     Nope! It's also an <code>new IntegerExp(1)</code>, but with the type set to <code>bool</code>, which
+     internally has enum value <code>TY.Tbool</code> in the frontend, and <code>TYbool</code> in the
+     backend.
+     Learning all these minutiae by rote is tedious, and a barrier for contributions.</p>
+
+  <p>When I created my <a href="https://github.com/dkorpel/ctod" target="_blank" rel="noopener">C to D</a>
+     tool, I also had to constantly check how the 'tree-sitter' C parser library I used names various C
+     constructs internally.
+     Something I found very useful was the
+     <a href="https://tree-sitter.github.io/tree-sitter/7-playground.html" target="_blank" rel="noopener">Syntax Tree Playground</a>:
+     an interactive website where you type C code, and it shows exactly how it maps to parser nodes.</p>
+
+  <p>Another source of inspiration is of course Matt Godbolt's
+     <a href="https://d.godbolt.org/" target="_blank" rel="noopener">compiler explorer</a>, which
+     interactively shows how C code maps to assembly.
+  </p>
+
+  <p>This tool gives a peak into DMD's various internal data
+     representations.
+     Feel free to experiment in the editor, or read on and I'll show you around.</p>
+
+  <!-- ============================ LEXING AND PARSING ============================ -->
+  <section class="parse" id="lexing">
+    <h2><span class="dot"></span>Lexing and parsing</h2>
+
+    <!-- ---------------- Tokenization ---------------- -->
+    <div class="sub">
+      <h3>Tokenization</h3>
+
+      <p>The first thing DMD does with D source code is split it up into 'tokens', which are the individual
+         words, strings, numbers and punctuation.
+         This is done by <a href="https://github.com/dlang/dmd/blob/765ef06db782209d0c816d7d0eea7b2c92da3fd3/compiler/src/dmd/lexer.d#L63">
+          <code>class Lexer</code></a>, which creates instances of <a href="https://github.com/dlang/dmd/blob/765ef06db782209d0c816d7d0eea7b2c92da3fd3/compiler/src/dmd/tokens.d#L640">
+          <code>struct Token</code></a>,
+         which is a tagged union identified by a member in <a href="https://github.com/dlang/dmd/blob/765ef06db782209d0c816d7d0eea7b2c92da3fd3/compiler/src/dmd/tokens.d#L26">
+         <code>enum TOK : ubyte</code></a>.
+         Every D keyword has their own token type.
+         Unfortunately, the compiler is in an awkward position where it needs to refer to its own reserved
+         keywords a lot, so the enum names always have to be (slightly) different than the source code names.
+         Often an underscore is added (<code>pure</code> becomes <code>pure_</code>), other times a
+         different word is used (<code>int</code> becomes <code>int32</code>).</p>
+
+      <p>All other names that appear in source code (variables, functions, types, attributes, ...) create an
+         'identifier'.
+         There isn't a hard line between keywords and identifiers though, since the compiler does have a
+         <a href="https://github.com/dlang/dmd/blob/765ef06db782209d0c816d7d0eea7b2c92da3fd3/compiler/src/dmd/id.d#L59">long list of recognized idenfitiers</a>.
+         The main difference is that keywords often play an important role in letting the parser recognize
+         constructs, like how <code>if</code> starts an if-statement and <code>struct</code> begins a struct
+         declaration.</p>
+
+      <p>Interactive demo:</p>
+      <div class="demo" data-examples="tokenKinds"></div>
+
+      <p>Some other observations:</p>
+      <ul>
+        <li>Number and string literals store their integer/string payload.</li>
+        <li>There are different types of number literals: <code>int32</code>, <code>int64</code>,
+            <code>uns32</code> etc.</li>
+        <li>The minus for negative numbers is a separate token: -3 is not parsed as <code>int32literal(-3)</code>,
+            but as <code>min int32literal(3)</code></li>
+        <li>Different kinds of string literal all create the same <code>string_</code> token</li>
+        <li>Builtin attributes with an @ are 2 tokens. So while nobody does it, you are allowed to write
+            arbitrary white space and comments inbetween, like <code>@ /*hello*/ nogc</code>.</li>
+        <li>Similarly, <code>extern(C++)</code> consists of separate <code>identifier(C)</code> and <code>plusPlus</code>
+            tokens.</li>
+      </ul>
+
+      <p>Tokenization is simple and stable.
+         Personally, I rarely look at it.
+         Most of the interesting stuff happens in the semantic analysis phase.
+         Before we arrive there however, we first visit the next part: parsing</p>
+    </div>
+
+    <!-- ---------------- Parsing ---------------- -->
+    <div class="sub">
+      <h3>Parsing</h3>
+
+      <p>Groups of tokens form 'constructs', like a class declaration, for loop, or expression.
+         It's the parser's job to recognize these constructs and error on malformed syntax, like mismatched
+         braces or missing semicolons.
+         Type checking happens afterwards in the semantic phase.</p>
+
+      <p>If you ever wonder whether something is a parse error or a semantic error, try compiling the code
+         inside a <code>version (none) {}</code> block.
+         Alternatively, put it in a template that you don't instantiate.
+         That way, the code doesn't get analyzed, but it is still required to parse.
+      </p>
+
+      <h4>Ambiguity</h4>
+
+      <p>D tries to have a
+         <a href="https://en.wikipedia.org/wiki/Context-free_grammar" target="_blank" rel="noopener">context free grammar</a>.
+         This means that theoretically, the parser can be implemented using functions like
+         <code>parseExp()</code>, <code>parseStatement()</code>, <code>parseDeclarations()</code>, that turn
+         the Lexer's token stream into Abstract Syntax Tree (AST) nodes, without any extra parameters or
+         global variables to decide how to do that.</p>
+
+      <p>Contrast this to C, which infamously requires keeping a symbol table while parsing.
+         Consider how the tokenizer ignores whitespace, so <code>size_t* i;</code> and <code>x * y;</code>
+         both give the parser <code>identifier mult identifier semicolon</code> as input;
+         It has to decide whether to create a declaration or expression based on what <code>identifier</code>
+         refers to.</p>
+
+      <pre class="codeblock"><code>X *Y;  // If X came from `typedef int X`, declare Y as a pointer to X
+X * Y; // If X and Y are variables, create a multiplication expression</code></pre>
+
+      <p>Since D has forward declarations and parses context-free, how does it handle this case?
+         Well, it arguably cheats a little.
+         When <code>X * Y</code> can be parsed as a declaration, that always has priority over multiplication.
+         This works because if it were a multiplication, it would be discarded, which is an error in D.
+         (Well technically you can have structs with operator overloading and write <code>X * Y</code> for
+         side-effects, but that's such bad style that I haven't ever seen anyone raise a complaint about
+         that)</p>
+
+      <p>But there are also cases where the parser is too eager to parse a type, such as:
+         <code>foo!(X[Y])</code>.
+         That template parameter is assumed to be a static array of type X with dimension Y, but it could
+         also be passing a compile time value computed by indexing X with Y.
+         This is later handled in semantic analysis: if it resolves the TypeIdentifier to an expression, it
+         rewrites the <code>TypeSArray</code> to an <code>ArrayExp</code>.
+         Conversely, if in <code>T[3].init</code> the <code>IdentifierExp</code> resolves to a type, the
+         <code>ArrayExp</code> gets rewritten to <code>TypeSArray</code>.
+         Cheeky!</p>
+
+      <p>Interactive demo:</p>
+      <div class="demo" data-examples="ambiguityDecl"></div>
+
+      <p>Bonus demos (selectable from a dropdown):</p>
+      <div class="demo" data-examples="structVsFunc,arrayInitVsAA,parseVsSema"></div>
+    </div>
+  </section>
+
+  <!-- ============================ SEMANTIC ============================ -->
+  <section class="sema" id="semantic">
+    <h2><span class="dot"></span>Semantic</h2>
+
+    <p>The parser generates an Abstract Syntax Tree, but a program is actually a graph.
+       To demonstrate this, let's create a cycle!</p>
+
+    <div class="demo" data-examples="cycle"></div>
+
+    <p>Identifiers link to each other.</p>
+
+    <div class="demo" data-examples="resolvedCycle"></div>
+
+    <p>Unlike other passes which take an input data structure and give back an output data structure, the
+       semantic phase rewrites the AST in place.
+       Parse-time nodes and semantic-time nodes all share the same class hierarchy rootet at
+       <code>class ASTnode</code>.
+       Don't worry, this has never led to any bugs before /s</p>
+
+    <p>Interactive demos:</p>
+    <div class="demo" data-examples="constFolding,addrToSymOff,arrayBasis"></div>
+  </section>
+
+  <!-- ============================ CODEGEN ============================ -->
+  <section class="codegen" id="codegen">
+    <h2><span class="dot"></span>Codegen</h2>
+
+    <p>Interactive demos:</p>
+    <div class="demo" data-examples="boundsCheck,stringSlicePair"></div>
+  </section>
+
+  <footer>
+    <a href="https://github.com/dkorpel/dmd-explorer/issues" target="_blank" rel="noopener"
+       title="Report a bug or suggest an improvement on GitHub">⚑ Feedback</a>
+    &nbsp;·&nbsp; <a href="index.html">← back to the explorer</a>
+  </footer>
+
+</main>
+
+<script type="module">
+// Turn every <div class="demo" data-examples="id1,id2,…"> into a live embed of
+// the explorer. The referenced ids are looked up in the shared catalog
+// (examples.js) — the same snippets the explorer's dropdown offers — so a demo's
+// code, panes and height live in exactly one place. With more than one id we add
+// a dropdown that swaps the embedded source.
+import { EXAMPLES_BY_ID } from "./examples.js";
+
+function embedSrc(panes, code, layout) {
+    const p = new URLSearchParams();
+    p.set("embed", "1");
+    p.set("layout", layout || "cols");
+    p.set("panes", panes);
+    p.set("src", code);
+    return "index.html?" + p.toString();
+}
+
+document.querySelectorAll(".demo").forEach(function (demo) {
+    const layout = demo.dataset.layout || "cols";
+    const variants = (demo.dataset.examples || "")
+        .split(",").map((s) => s.trim()).filter(Boolean)
+        .map((id) => EXAMPLES_BY_ID[id])
+        .filter(Boolean);
+    if (!variants.length) return;
+
+    const iframe = document.createElement("iframe");
+    iframe.loading = "lazy";
+    iframe.height = demo.dataset.height || variants[0].height || "300";
+    iframe.title = "DMD explorer demo";
+    const show = function (v) { iframe.src = embedSrc(v.panes, v.code, layout); };
+
+    if (variants.length > 1) {
+        const sel = document.createElement("select");
+        sel.className = "demo-select";
+        sel.title = "Pick an example";
+        variants.forEach(function (v, i) {
+            const o = document.createElement("option");
+            o.value = String(i);
+            o.textContent = v.label || ("Example " + (i + 1));
+            sel.appendChild(o);
+        });
+        sel.addEventListener("change", function () { show(variants[+sel.value]); });
+        demo.appendChild(sel);
+    }
+    demo.appendChild(iframe);
+    show(variants[0]);
+});
+</script>
+</body>
+</html>

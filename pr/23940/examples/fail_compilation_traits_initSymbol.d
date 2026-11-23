@@ -1,0 +1,66 @@
+/********************************************
+TEST_OUTPUT:
+---
+fail_compilation/traits_initSymbol.d(105): Error: struct / class type expected as argument to __traits(initSymbol) instead of `int`
+fail_compilation/traits_initSymbol.d(106): Error: struct / class type expected as argument to __traits(initSymbol) instead of `S[2]`
+fail_compilation/traits_initSymbol.d(107): Error: struct / class type expected as argument to __traits(initSymbol) instead of `123`
+---
+*/
+#line 100
+
+struct S { int i = 4; }
+
+void test1()
+{
+    const void[] initInt   = __traits(initSymbol, int);
+    const void[] initArray = __traits(initSymbol, S[2]);
+    const void[] initValue = __traits(initSymbol, 123);
+}
+
+/********************************************
+TEST_OUTPUT:
+---
+fail_compilation/traits_initSymbol.d(206): Error: cannot read the contents of `cast(const(ubyte)[])S` at compile time, they are only known at link time
+fail_compilation/traits_initSymbol.d(206):        called from here: `(*(function () pure nothrow @nogc @safe => (cast(const(ubyte)[])S)[0]))()`
+---
+*/
+#line 200
+
+// The slice can be stored and its length read at compile time, but not its contents
+void test2()
+{
+    enum initLen = (() => __traits(initSymbol, S).length)();
+    static assert(initLen == S.sizeof);
+    enum firstByte = (() => (cast(const(ubyte)[]) __traits(initSymbol, S))[0])();
+}
+
+/********************************************
+TEST_OUTPUT:
+---
+fail_compilation/traits_initSymbol.d(305): Error: struct / class type expected as argument to __traits(initSymbol) instead of `traits_initSymbol.Interface`
+---
+*/
+#line 300
+
+interface Interface {}
+
+void test3()
+{
+    const void[] initInterface = __traits(initSymbol, Interface);
+}
+
+/********************************************
+TEST_OUTPUT:
+---
+fail_compilation/traits_initSymbol.d(404): Error: expected 1 arguments for `initSymbol` but had 0
+fail_compilation/traits_initSymbol.d(405): Error: expected 1 arguments for `initSymbol` but had 2
+---
+*/
+#line 400
+
+
+void test4()
+{
+    const void[] tmp = __traits(initSymbol);
+    const void[] tmo = __traits(initSymbol, Interface, S);
+}

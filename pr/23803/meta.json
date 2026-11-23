@@ -1,0 +1,1 @@
+{"author":"nordlow","base":"86b74e21ce93b86218f8aee2f3a32495601f0f78","baseRef":"master","builtAt":"2026-09-15T18:24:26Z","explorerRef":"a3033500fb25bb6ece24427c80adde7c41809172","head":"12c5b4c286129e397fba4af00af9c515cb002fb4","pr":23803,"repo":"dlang/dmd","state":"OPEN","title":"Add __traits isDynamicArray","url":"https://github.com/dlang/dmd/pull/23803"}
